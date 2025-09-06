@@ -1,0 +1,6 @@
+https://appcenter.intuit.com/connect/oauth2
+  ?client_id=ABFEj4xs3FW9f1oCAEXrH0Ww04eFdJAbQSQwbq03imSVrkXLY4
+  &response_type=code
+  &scope=com.intuit.quickbooks.accounting
+  &redirect_uri=https://developer.intuit.com/v2/OAuth2Playground/RedirectUrl
+  &state=xyz123

@@ -1,0 +1,11 @@
+{
+  "name": "InvoiceSender",
+  "version": "1.0.0",
+  "main": "index.js",
+  "repository": "https://github.com/dreuvenrsg/InvoiceSender.git",
+  "author": "Doron Reuven <dreuven@rsgsecurity.com>",
+  "license": "MIT",
+  "dependencies": {
+    "node-fetch": "^3.3.2"
+  }
+}
