@@ -44,7 +44,7 @@ const config = {
   
   // Common configuration
   TOKEN_URL: "https://oauth.platform.intuit.com/oauth2/v1/tokens/bearer",
-  MINOR_VERSION: 65,
+  MINOR_VERSION: 75,
   
   // Business rules
   EXCLUDED_CUSTOMERS: ['siemens', 'honeywell'] // case-insensitive
@@ -194,6 +194,40 @@ const qboAPI = {
     }
   },
 
+  async postEmpty(pathAndQuery) {
+    const url = `${activeConfig.HOST}/${activeConfig.REALM_ID}${pathAndQuery}`;
+    
+    console.log(`[QBO API] POST (empty) ${pathAndQuery}`);
+    
+    try {
+      const response = await fetch(url, {
+        method: "POST",
+        headers: {
+          Authorization: `Bearer ${oauth.accessToken}`,
+          Accept: "application/json",
+          "Content-Type": "application/octet-stream",
+          "Content-Length": "0"
+        }
+      });
+
+      const responseText = await response.text();
+      
+      if (!response.ok) {
+        console.error(`[QBO API] POST (empty) request failed!`);
+        console.error(`[QBO API] URL: ${url}`);
+        console.error(`[QBO API] Status: ${response.status}`);
+        console.error(`[QBO API] Response: ${responseText}`);
+        throw new Error(`POST (empty) ${pathAndQuery} failed: ${response.status} - ${responseText}`);
+      }
+      
+      return responseText ? JSON.parse(responseText) : {};
+      
+    } catch (error) {
+      console.error(`[QBO API] Error during POST (empty) request:`, error.message);
+      throw error;
+    }
+  },
+
   async query(queryString) {
     console.log(`[QBO API] Executing query:`, queryString.trim());
     const response = await this.get(`/query?minorversion=${config.MINOR_VERSION}&query=${encodeURIComponent(queryString)}`);
@@ -318,10 +352,14 @@ const invoiceModule = {
     return invoice;
   },
 
-  async sendInvoice(invoiceId) {
+  async sendInvoice(invoiceId, sendTo = null) {
     console.log(`[Invoice] Sending invoice ID: ${invoiceId}`);
-    await qboAPI.post(`/invoice/${invoiceId}/send?minorversion=${config.MINOR_VERSION}`, null);
-    console.log(`[Invoice] Successfully sent invoice`);
+    const qp = new URLSearchParams({ minorversion: String(config.MINOR_VERSION) });
+    if (sendTo) qp.append("sendTo", sendTo);
+    
+    await qboAPI.postEmpty(`/invoice/${invoiceId}/send?${qp.toString()}`);
+    
+    console.log(`[Invoice] ✅ Successfully sent invoice`);
     return true;
   }
 };
@@ -573,7 +611,7 @@ const app = {
         errors: 0,
         details: []
       };
-      return; //Uncomment when ready to run wild in prod and ok if in sandbox
+    //   return; //Uncomment when ready to run wild in prod and ok if in sandbox
       for (const invoice of invoices) {
         results.processed++;
         
