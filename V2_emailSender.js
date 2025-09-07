@@ -1,10 +1,9 @@
 /**
- * QBO Email & Send Flow (Modular Version)
+ * QBO Email & Send Flow (Modular Version) - FIXED
  * -----------------------------------------
  * Automatically sends invoices to customers via QuickBooks Online
  * Excludes Siemens and Honeywell customers
  */
-
 
 /*
 To get a refresh token again go here
@@ -33,7 +32,7 @@ const config = {
     REALM_ID: "9341455274031163"
   },
   
-  // PRODUCTION Credentials (commented out)
+  // PRODUCTION Credentials
   production: {
     CLIENT_ID: "ABFEj4xs3FW9f1oCAEXrH0Ww04eFdJAbQSQwbq03imSVrkXLY4",
     CLIENT_SECRET: "5sYuOuGpVmHWErATqsUk4jmIrDfIu2GtnHy5sWfc",
@@ -51,8 +50,8 @@ const config = {
   EXCLUDED_CUSTOMERS: ['siemens', 'honeywell'] // case-insensitive
 };
 
-// Use sandbox by default
-const activeConfig = config.sandbox;
+// Use sandbox by default - change this to config.production for production
+const activeConfig = config.production;
 let currentRefreshToken = activeConfig.REFRESH_TOKEN;
 
 // ===========================
@@ -216,7 +215,13 @@ const invoiceModule = {
     
     // Filter for unsent and unpaid invoices
     const unsentUnpaidInvoices = Invoice.filter(inv => 
-        inv.EmailStatus === 'NeedToSend' && inv.Balance > 0
+    {
+        if (inv.EmailStatus !== 'EmailSent'){
+            console.log('Not Sent\n')
+            console.log(inv)
+        }
+        return (inv.EmailStatus === 'NeedToSend' || inv.EmailStatus === 'NotSet') && inv.Balance > 0;
+    }
     );
     
     console.log(`[Invoice] Found ${Invoice.length} total invoice(s), ${unsentUnpaidInvoices.length} are unsent with balance > 0`);
@@ -225,25 +230,46 @@ const invoiceModule = {
   },
 
   async getFullInvoice(id) {
+    console.log(`[Invoice] Fetching full details for invoice ID: ${id}`);
     const { Invoice } = await qboAPI.get(`/invoice/${id}?minorversion=${config.MINOR_VERSION}`);
+    console.log(`[Invoice] Retrieved invoice #${Invoice.DocNumber}`);
     return Invoice;
   },
 
-  async updateInvoice(invoiceId, syncToken, fieldsToUpdate) {
-    const body = { 
-      Invoice: { 
-        Id: invoiceId, 
-        SyncToken: syncToken, 
-        sparse: true, 
-        ...fieldsToUpdate 
-      } 
+  async updateInvoice(fullInvoice, fieldsToUpdate) {
+    console.log(`[Invoice] Updating invoice ID: ${fullInvoice.Id}`);
+    console.log(`[Invoice] SyncToken: ${fullInvoice.SyncToken}`);
+    console.log(`[Invoice] Fields to update:`, JSON.stringify(fieldsToUpdate, null, 2));
+    
+    // Build the update body with all required fields from the current invoice
+    // According to QBO docs, CustomerRef and Line are required even for sparse updates
+    const body = {
+      Id: fullInvoice.Id,
+      SyncToken: fullInvoice.SyncToken,
+      CustomerRef: fullInvoice.CustomerRef,
+      Line: fullInvoice.Line,
+      // Apply the updates
+      ...fieldsToUpdate
     };
-    const { Invoice } = await qboAPI.post(`/invoice?minorversion=${config.MINOR_VERSION}`, body);
-    return Invoice;
+    
+    // Log truncated output to avoid massive logs with Line items
+    const bodyStr = JSON.stringify(body, null, 2);
+    console.log(`[Invoice] Full update body (first 500 chars):`, bodyStr.substring(0, 500) + '...');
+    
+    // Use sparse=true to only update the changed fields
+    const result = await qboAPI.post(`/invoice?minorversion=${config.MINOR_VERSION}&sparse=true`, body);
+    
+    // The response comes back with Invoice wrapped
+    const invoice = result.Invoice || result;
+    console.log(`[Invoice] Successfully updated invoice #${invoice.DocNumber}`);
+    
+    return invoice;
   },
 
   async sendInvoice(invoiceId) {
+    console.log(`[Invoice] Sending invoice ID: ${invoiceId}`);
     await qboAPI.post(`/invoice/${invoiceId}/send?minorversion=${config.MINOR_VERSION}`, null);
+    console.log(`[Invoice] Successfully sent invoice`);
     return true;
   }
 };
@@ -253,8 +279,15 @@ const invoiceModule = {
 // ===========================
 const customerModule = {
   async getCustomersMap(invoices) {
+    console.log("[Customer] Building customer map...");
+    
     const customerIds = [...new Set(invoices.map(i => i.CustomerRef?.value).filter(Boolean))];
-    if (!customerIds.length) return {};
+    if (!customerIds.length) {
+      console.log("[Customer] No customer IDs found in invoices");
+      return {};
+    }
+    
+    console.log(`[Customer] Fetching details for ${customerIds.length} unique customer(s)`);
     
     const query = `SELECT Id, DisplayName, PrimaryEmailAddr FROM Customer WHERE Id IN (${customerIds.map(id => `'${id}'`).join(',')})`;
     const { Customer = [] } = await qboAPI.query(query);
@@ -263,18 +296,27 @@ const customerModule = {
     for (const customer of Customer) {
       customerMap[customer.Id] = { 
         DisplayName: customer.DisplayName, 
-        PrimaryEmail: customer.PrimaryEmailAddr?.Address || null 
+        PrimaryEmail: customer.PrimaryEmailAddr?.Address || null
       };
+      console.log(`[Customer] Loaded: ${customer.DisplayName} (${customer.PrimaryEmailAddr?.Address || 'no email'})`);
     }
+    
     return customerMap;
   },
 
   isExcludedCustomer(customerName) {
     if (!customerName) return false;
+    
     const lowerName = customerName.toLowerCase();
-    return config.EXCLUDED_CUSTOMERS.some(excluded => 
+    const isExcluded = config.EXCLUDED_CUSTOMERS.some(excluded => 
       lowerName.includes(excluded.toLowerCase())
     );
+    
+    if (isExcluded) {
+      console.log(`[Customer] Customer "${customerName}" matches exclusion list`);
+    }
+    
+    return isExcluded;
   }
 };
 
@@ -283,12 +325,22 @@ const customerModule = {
 // ===========================
 const shippingModule = {
   async resolveShipMethodByName(name) {
-    if (!name) return null;
+    if (!name) {
+      console.log("[Shipping] No shipping method name provided");
+      return null;
+    }
+    
+    console.log(`[Shipping] Looking up shipping method: "${name}"`);
     
     const query = `SELECT Name, Id FROM ShipMethod WHERE Name = '${name.replace(/'/g,"''")}'`;
     const { ShipMethod = [] } = await qboAPI.query(query);
     
-    if (!ShipMethod.length) return null;
+    if (!ShipMethod.length) {
+      console.log(`[Shipping] Shipping method "${name}" not found in QuickBooks`);
+      return null;
+    }
+    
+    console.log(`[Shipping] Found shipping method: ${ShipMethod[0].Name} (ID: ${ShipMethod[0].Id})`);
     return { value: ShipMethod[0].Id, name: ShipMethod[0].Name };
   }
 };
@@ -316,7 +368,6 @@ const externalDataModule = {
     // TODO: Implement your external API integration here
     // This is a placeholder that returns empty data
     return {
-      // additionalEmails: ['ops@example.com', 'ap@example.com'],
       // trackingNumber: '1Z999AA10123456784',
       // shipMethodName: 'UPS Ground'
     };
@@ -328,68 +379,88 @@ const externalDataModule = {
 // ===========================
 const invoiceProcessor = {
   async processInvoice(invoice, customersMap) {
-    // Get full invoice details
-    const fullInvoice = await invoiceModule.getFullInvoice(invoice.Id);
-    const customer = customersMap[fullInvoice.CustomerRef?.value] || {};
+    console.log(`\n[Processor] === Processing Invoice ID: ${invoice.Id} ===`);
     
-    // Check if customer should be excluded
-    if (customerModule.isExcludedCustomer(customer.DisplayName)) {
-      console.log(`Skipping invoice #${fullInvoice.DocNumber} for ${customer.DisplayName} (excluded customer)`);
-      return { skipped: true, reason: 'excluded_customer' };
+    try {
+      // Get full invoice details
+      const fullInvoice = await invoiceModule.getFullInvoice(invoice.Id);
+      const customer = customersMap[fullInvoice.CustomerRef?.value] || {};
+      
+      console.log(`[Processor] Invoice #${fullInvoice.DocNumber} for customer: ${customer.DisplayName || 'Unknown'}`);
+      console.log(`[Processor] Balance: $${fullInvoice.Balance}`);
+      
+      // Check if customer should be excluded
+      if (customerModule.isExcludedCustomer(customer.DisplayName)) {
+        console.log(`[Processor] ⚠️  Skipping invoice #${fullInvoice.DocNumber} - excluded customer`);
+        return { skipped: true, reason: 'excluded_customer' };
+      }
+      
+      // Fetch external data for tracking and shipping (not for emails anymore)
+      console.log(`[Processor] Fetching external data for tracking/shipping...`);
+      const externalData = await externalDataModule.fetchExternalDataForInvoice({ 
+        invoice: fullInvoice, 
+        customer 
+      });
+      
+      // Use email recipients from customer data only
+      console.log(`[Processor] Preparing email recipients...`);
+      
+      const recipients = customer.PrimaryEmail ? utils.normalizeEmails(customer.PrimaryEmail) : '';
+      
+      if (!recipients) {
+        console.log(`[Processor] ⚠️  Warning: No email addresses configured for customer ${customer.DisplayName}`);
+      } else {
+        console.log(`[Processor] Recipients: ${recipients}`);
+      }
+      
+      // Prepare tracking and shipping info
+      const tracking = externalData?.trackingNumber || fullInvoice.TrackingNum || null;
+      if (tracking) {
+        console.log(`[Processor] Tracking number: ${tracking}`);
+      }
+      
+      let shipMethodRef = fullInvoice.ShipMethodRef || null;
+      if (externalData?.shipMethodName) {
+        console.log(`[Processor] Looking up shipping method from external data...`);
+        const resolved = await shippingModule.resolveShipMethodByName(externalData.shipMethodName);
+        if (resolved) shipMethodRef = resolved;
+      }
+      
+      // Build update fields
+      const fieldsToUpdate = {};
+      if (recipients) fieldsToUpdate.BillEmail = { Address: recipients };
+      if (tracking) fieldsToUpdate.TrackingNum = tracking;
+      if (shipMethodRef?.value) fieldsToUpdate.ShipMethodRef = shipMethodRef;
+      
+      // Update invoice if needed
+      let updatedInvoice = fullInvoice;
+      if (Object.keys(fieldsToUpdate).length) {
+        console.log(`[Processor] Updating invoice with ${Object.keys(fieldsToUpdate).length} field(s)...`);
+        updatedInvoice = await invoiceModule.updateInvoice(
+          fullInvoice,  // Pass the full invoice object
+          fieldsToUpdate
+        );
+      } else {
+        console.log(`[Processor] No updates needed for invoice`);
+      }
+      
+      // Send the invoice
+      console.log(`[Processor] Sending invoice #${updatedInvoice.DocNumber}...`);
+      await invoiceModule.sendInvoice(updatedInvoice.Id);
+      
+      console.log(`[Processor] ✅ Successfully sent invoice #${updatedInvoice.DocNumber}`);
+      console.log(`[Processor] Recipients: ${updatedInvoice.BillEmail?.Address || 'None'}`);
+      
+      return { 
+        success: true, 
+        invoiceNumber: updatedInvoice.DocNumber,
+        email: updatedInvoice.BillEmail?.Address 
+      };
+      
+    } catch (error) {
+      console.error(`[Processor] ❌ Error processing invoice:`, error.message);
+      throw error;
     }
-    
-    // Fetch external data
-    const externalData = await externalDataModule.fetchExternalDataForInvoice({ 
-      invoice: fullInvoice, 
-      customer 
-    });
-    
-    // Prepare email recipients
-    let recipients = '';
-    if (externalData?.additionalEmails?.length) {
-      recipients = utils.normalizeEmails(externalData.additionalEmails);
-    } else {
-      recipients = utils.normalizeEmails([
-        fullInvoice.BillEmail?.Address, 
-        customer.PrimaryEmail
-      ]);
-    }
-    
-    // Prepare tracking and shipping info
-    const tracking = externalData?.trackingNumber || fullInvoice.TrackingNum || null;
-    let shipMethodRef = fullInvoice.ShipMethodRef || null;
-    
-    if (externalData?.shipMethodName) {
-      const resolved = await shippingModule.resolveShipMethodByName(externalData.shipMethodName);
-      if (resolved) shipMethodRef = resolved;
-    }
-    
-    // Build update fields
-    const fieldsToUpdate = {};
-    if (recipients) fieldsToUpdate.BillEmail = { Address: recipients };
-    if (tracking) fieldsToUpdate.TrackingNum = tracking;
-    if (shipMethodRef?.value) fieldsToUpdate.ShipMethodRef = shipMethodRef;
-    
-    // Update invoice if needed
-    let updatedInvoice = fullInvoice;
-    if (Object.keys(fieldsToUpdate).length) {
-      updatedInvoice = await invoiceModule.updateInvoice(
-        fullInvoice.Id, 
-        fullInvoice.SyncToken, 
-        fieldsToUpdate
-      );
-      console.log(`Updated invoice #${updatedInvoice.DocNumber}: email="${updatedInvoice.BillEmail?.Address}"`);
-    }
-    
-    // Send the invoice
-    await invoiceModule.sendInvoice(updatedInvoice.Id);
-    console.log(`✅ Sent invoice #${updatedInvoice.DocNumber} to ${updatedInvoice.BillEmail?.Address}`);
-    
-    return { 
-      success: true, 
-      invoiceNumber: updatedInvoice.DocNumber,
-      email: updatedInvoice.BillEmail?.Address 
-    };
   }
 };
 
@@ -447,7 +518,7 @@ const app = {
         errors: 0,
         details: []
       };
-      
+      return;
       for (const invoice of invoices) {
         results.processed++;
         
