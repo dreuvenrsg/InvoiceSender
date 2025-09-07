@@ -198,6 +198,25 @@ const qboAPI = {
     console.log(`[QBO API] Executing query:`, queryString.trim());
     const response = await this.get(`/query?minorversion=${config.MINOR_VERSION}&query=${encodeURIComponent(queryString)}`);
     return response.QueryResponse || {};
+  },
+  
+  async queryPage(baseQuery, { start = 1, pageSize = 1000 } = {}) {
+    const q = `${baseQuery} STARTPOSITION ${start} MAXRESULTS ${pageSize}`;
+    return this.query(q);   // call the explicit reference
+  },
+  async queryAllInvoices (baseQuery, { pageSize = 1000, maxPages = 10 } = {}) {
+    let start = 1;
+    const all = [];
+
+    for (let page = 0; page < maxPages; page++) {
+        const { Invoice = [] } = await this.queryPage(baseQuery, { start, pageSize });
+        all.push(...Invoice);
+
+        if (Invoice.length < pageSize) break; // last page
+        start += pageSize;
+    }
+
+    return all;
   }
 };
 
@@ -206,26 +225,21 @@ const qboAPI = {
 // ===========================
 const invoiceModule = {
   async getUnsentUnpaidInvoices() {
-    console.log("[Invoice] Fetching invoices...");
-    
-    // Get all invoices and filter in JavaScript
-    const query = `SELECT Id, DocNumber, Balance, EmailStatus, CustomerRef, BillEmail FROM Invoice ORDER BY TxnDate DESC`;
-    
-    const { Invoice = [] } = await qboAPI.query(query);
-    
-    // Filter for unsent and unpaid invoices
-    const unsentUnpaidInvoices = Invoice.filter(inv => 
-    {
-        if (inv.EmailStatus !== 'EmailSent'){
-            console.log('Not Sent\n')
-            console.log(inv)
-        }
-        return (inv.EmailStatus === 'NeedToSend' || inv.EmailStatus === 'NotSet') && inv.Balance > 0;
-    }
+    console.log("[Invoice] Fetching invoices (paged, then filtering in JS)...");
+
+    const base = `
+        SELECT Id, DocNumber, Balance, EmailStatus, CustomerRef, BillEmail
+        FROM Invoice
+        ORDER BY TxnDate DESC
+    `;
+
+    const allInvoices = await qboAPI.queryAllInvoices(base, { pageSize: 1000 });
+
+    const unsentUnpaidInvoices = allInvoices.filter(inv =>
+        (inv.EmailStatus === 'NeedToSend' || inv.EmailStatus === 'NotSet') && inv.Balance > 0
     );
-    
-    console.log(`[Invoice] Found ${Invoice.length} total invoice(s), ${unsentUnpaidInvoices.length} are unsent with balance > 0`);
-    
+
+    console.log(`[Invoice] Found ${allInvoices.length} total invoice(s), ${unsentUnpaidInvoices.length} are unsent with balance > 0`);
     return unsentUnpaidInvoices;
   },
 
