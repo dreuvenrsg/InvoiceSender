@@ -521,6 +521,11 @@ const invoiceProcessor = {
       
       // Build update fields
       const fieldsToUpdate = {};
+      if (recipients.length > 100) {
+        //note: there is client-side validation upon entering the info on the Quickbooks web app so this is just for sanity.
+        console.log('\n\n⚠️ Recipients string too long (>100 chars), will not send!\n\n');
+        return;
+      }
       if (recipients) fieldsToUpdate.BillEmail = { Address: recipients };
       if (tracking) fieldsToUpdate.TrackingNum = tracking;
       if (shipMethodRef?.value) fieldsToUpdate.ShipMethodRef = shipMethodRef;
