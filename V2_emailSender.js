@@ -217,6 +217,41 @@ const qboAPI = {
     }
 
     return all;
+  },
+  async queryAllInvoicesSince (baseQuery, { pageSize = 1000, sinceDate, maxPages = 200 } = {}) {
+    let start = 1;
+    const all = [];
+    const sinceKey = sinceDate ? dateKeyFromDate(sinceDate) : null;
+
+    for (let page = 0; page < maxPages; page++) {
+        const q = `${baseQuery} STARTPOSITION ${start} MAXRESULTS ${pageSize}`;
+        const { Invoice = [] } = await qboAPI.query(q);
+
+        if (!Invoice.length) break;
+
+        // Keep items in the window (if sinceDate provided)
+        if (sinceKey) {
+        for (const inv of Invoice) {
+            const k = dateKeyFromQbo(inv.TxnDate);
+            if (k !== null && k >= sinceKey) all.push(inv);
+        }
+        } else {
+        all.push(...Invoice);
+        }
+
+        // Early stop: if the *last* row in this page is already older than 'since', no need to fetch more
+        if (sinceKey) {
+        const last = Invoice[Invoice.length - 1];
+        const lastKey = dateKeyFromQbo(last?.TxnDate);
+        if (lastKey !== null && lastKey < sinceKey) break;
+        }
+
+        // More pages
+        if (Invoice.length < pageSize) break;
+        start += pageSize;
+    }
+
+    return all;
   }
 };
 
@@ -224,23 +259,26 @@ const qboAPI = {
 // Invoice Module
 // ===========================
 const invoiceModule = {
-  async getUnsentUnpaidInvoices() {
-    console.log("[Invoice] Fetching invoices (paged, then filtering in JS)...");
+  async getUnsentUnpaidInvoices({ windowDays = 30 } = {}) {
+    console.log("[Invoice] Fetching invoices (paged, limited by recent window, then filtering in JS)...");
 
     const base = `
-        SELECT Id, DocNumber, Balance, EmailStatus, CustomerRef, BillEmail
-        FROM Invoice
-        ORDER BY TxnDate DESC
-    `;
+    SELECT Id, DocNumber, Balance, EmailStatus, CustomerRef, BillEmail, TxnDate
+    FROM Invoice
+    ORDER BY TxnDate DESC
+  `;
 
-    const allInvoices = await qboAPI.queryAllInvoices(base, { pageSize: 1000 });
+    const since = daysAgo(windowDays);
+    const recentInvoices = await qboAPI.queryAllInvoicesSince(base, { pageSize: 1000, sinceDate: since });
 
-    const unsentUnpaidInvoices = allInvoices.filter(inv =>
-        (inv.EmailStatus === 'NeedToSend' || inv.EmailStatus === 'NotSet') && inv.Balance > 0
+    const unsentUnpaid = recentInvoices.filter(inv =>
+        (inv.EmailStatus === 'NeedToSend' || inv.EmailStatus === 'NotSet') &&
+        Number(inv.Balance) > 0
     );
 
-    console.log(`[Invoice] Found ${allInvoices.length} total invoice(s), ${unsentUnpaidInvoices.length} are unsent with balance > 0`);
-    return unsentUnpaidInvoices;
+    console.log(`[Invoice] Considered last ${windowDays} day(s): ${recentInvoices.length} invoices; ` +
+                `${unsentUnpaid.length} are unsent with balance > 0`);
+    return unsentUnpaid;
   },
 
   async getFullInvoice(id) {
@@ -393,6 +431,7 @@ const externalDataModule = {
 // ===========================
 const invoiceProcessor = {
   async processInvoice(invoice, customersMap) {
+    await sleep(50); // 50ms delay before processing each invoice
     console.log(`\n[Processor] === Processing Invoice ID: ${invoice.Id} ===`);
     
     try {
@@ -407,6 +446,8 @@ const invoiceProcessor = {
       if (customerModule.isExcludedCustomer(customer.DisplayName)) {
         console.log(`[Processor] ⚠️  Skipping invoice #${fullInvoice.DocNumber} - excluded customer`);
         return { skipped: true, reason: 'excluded_customer' };
+      } else {
+        console.log('Not skipping invoice')
       }
       
       // Fetch external data for tracking and shipping (not for emails anymore)
@@ -532,7 +573,7 @@ const app = {
         errors: 0,
         details: []
       };
-      return;
+      return; //Uncomment when ready to run wild in prod and ok if in sandbox
       for (const invoice of invoices) {
         results.processed++;
         
@@ -638,3 +679,31 @@ export {
   externalDataModule,
   invoiceProcessor
 };
+
+// ---- utils: dates (add once) ----
+function dateKeyFromDate(d) {
+  // yyyymmdd as number
+  const y = d.getFullYear();
+  const m = d.getMonth() + 1;
+  const day = d.getDate();
+  return y * 10000 + m * 100 + day;
+}
+
+function dateKeyFromQbo(txnDateStr) {
+  // Accepts 'YYYY-MM-DD' or 'YYYY/MM/DD'
+  if (!txnDateStr) return null;
+  const m = /^(\d{4})[-/](\d{2})[-/](\d{2})$/.exec(txnDateStr);
+  if (!m) return null;
+  return Number(m[1]) * 10000 + Number(m[2]) * 100 + Number(m[3]);
+}
+
+function daysAgo(n) {
+  const d = new Date();
+  d.setHours(0,0,0,0);
+  d.setDate(d.getDate() - n);
+  return d;
+}
+
+function sleep(ms) {
+  return new Promise(resolve => setTimeout(resolve, ms));
+}
