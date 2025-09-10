@@ -36,7 +36,7 @@ const config = {
   production: {
     CLIENT_ID: "ABFEj4xs3FW9f1oCAEXrH0Ww04eFdJAbQSQwbq03imSVrkXLY4",
     CLIENT_SECRET: "5sYuOuGpVmHWErATqsUk4jmIrDfIu2GtnHy5sWfc",
-    REFRESH_TOKEN: "RT1-50-H0-1765926631tl5xo9ya7g0klvew83hc",
+    REFRESH_TOKEN: "RT1-110-H0-17660993103z9kfzvk2oy3azpcfkie",
     ACCESS_TOKEN: "eyJhbGciOiJkaXIiLCJlbmMiOiJBMTI4Q0JDLUhTMjU2IiwieC5vcmciOiJIMCJ9..uzkKkgTR5wNRDgyy1GP2Zg.qyUWS_USgJz1-i-eKuVPNI9piBTrmpU5xioSNTH-Yg83aOVZ52nn2ZsZHTVCH7dXe_E1R1xKE81k5cSLeLZiwJo7xBn3Sy1VNwOn2saLNX1vxxdbE--9Fe9zRURLuLh3nEmVXroDIJwUXvO7uU-7EV1axA2av8ke2HmVu0Wx1TYhDBOLXyjPny1AYih-b4KmrEPfqoaweA7r1aGlFzOfdMRTOGRsUouhD62gS0504AFdiw1NbrnHfHkXWRqwbCxg0qOI2b0JZXjpVk0BWBDk2ZGfUXkqTY56hZfXl6GJmMecy9rdf-i8Sv59R3p3q1YvcK3Iz5RBgwsunHiYWS-ag8wiUBj368lbOxgiB4M14Z6Xa2q1aoXgRUg7OWI_dueia_FxPDwf-Zz-js_nTMfkfxWR9eNcfzGUYpN3_A6iLZW05q7Z1x0MRAgahC8JIBDuDj5PkvwvS-AWEDA85zNk6A6FBlGaT3RgWmgR6jciGiFYVLb0Qpf9E1Ih11La6eFmO9nPNaY6GbYj956Emu3IQjIIiq6xHOVNkpt80yiBi-v7jptd_lnG6da31ADevDPhEqbD_xbo5iwyc3APsAgAOnth3bOwMkfyydEI-Gd-qmN79MgPhhRoCo7E9A9iPAA1.3gSHSpuljCbWyI0X4cSTZA",
     HOST: "https://quickbooks.api.intuit.com/v3/company",
     REALM_ID: "9341453397929901"
@@ -47,7 +47,8 @@ const config = {
   MINOR_VERSION: 75,
   
   // Business rules
-  EXCLUDED_CUSTOMERS: ['siemens', 'honeywell'] // case-insensitive
+  EXCLUDED_CUSTOMERS: ['siemens', 'honeywell'], // case-insensitive
+  INCLUDED_CUSTOMERS: ['Johnson Controls Fire Protection LP']
 };
 
 // Use sandbox by default - change this to config.production for production
@@ -314,14 +315,43 @@ const invoiceModule = {
                 `${unsentUnpaid.length} are unsent with balance > 0`);
     return unsentUnpaid;
   },
+  async getJCIFireProtectionInvoices({ windowDays = 720 } = {}) {
+    console.log("[Invoice] Fetching invoices (paged, limited by recent window, then filtering in JS)...");
 
+    const base = `
+    SELECT Id, DocNumber, Balance, EmailStatus, CustomerRef, BillEmail, TxnDate
+    FROM Invoice
+    ORDER BY TxnDate DESC
+  `;
+
+    const since = daysAgo(windowDays);
+    const recentInvoices = await qboAPI.queryAllInvoicesSince(base, { pageSize: 1000, sinceDate: since });
+
+    const unsentUnpaid = recentInvoices.filter(inv => {
+      if(inv.CustomerRef.name == 'Johnson Controls Fire Protection LP'){
+        try{
+            return Number(inv.Balance) > 0 && inv.BillEmail.Address.includes('americas.invoice') && !inv.BillEmail.Address.toLowerCase().includes("PTP-Scanning-SG-US-535@jci.com".toLowerCase())
+        } catch (err){
+            console.log('error is: ', err);
+            return false;
+        }
+        
+      } else{
+            return false;
+      }
+    });
+
+    console.log(`[Invoice] Considered last ${windowDays} day(s): ${recentInvoices.length} invoices; ` +
+                `${unsentUnpaid.length} are unsent with balance > 0`);
+    return unsentUnpaid;
+  },
   async getFullInvoice(id) {
     console.log(`[Invoice] Fetching full details for invoice ID: ${id}`);
     const { Invoice } = await qboAPI.get(`/invoice/${id}?minorversion=${config.MINOR_VERSION}`);
     console.log(`[Invoice] Retrieved invoice #${Invoice.DocNumber}`);
     return Invoice;
   },
-
+  
   async updateInvoice(fullInvoice, fieldsToUpdate) {
     console.log(`[Invoice] Updating invoice ID: ${fullInvoice.Id}`);
     console.log(`[Invoice] SyncToken: ${fullInvoice.SyncToken}`);
@@ -401,12 +431,16 @@ const customerModule = {
     const isExcluded = config.EXCLUDED_CUSTOMERS.some(excluded => 
       lowerName.includes(excluded.toLowerCase())
     );
+
+    const isIncluded = config.INCLUDED_CUSTOMERS.some(cust_name => 
+      lowerName.includes(cust_name.toLowerCase())
+    );
     
     if (isExcluded) {
       console.log(`[Customer] Customer "${customerName}" matches exclusion list`);
     }
     
-    return isExcluded;
+    return isExcluded || !isIncluded;
   }
 };
 
@@ -588,8 +622,8 @@ const app = {
       
       // Step 1: Get unsent invoices
       console.log('📋 Fetching unsent invoices...');
-      const invoices = await invoiceModule.getUnsentUnpaidInvoices();
-      
+    //   const invoices = await invoiceModule.getUnsentUnpaidInvoices();
+      const invoices = await invoiceModule.getJCIFireProtectionInvoices();
       if (!invoices.length) {
         console.log('No invoices to process.');
         console.log('\n=====================================');
