@@ -921,7 +921,15 @@ const externalDataModule = {
         }
 
         // 2) Fallback: most recent shipped
-        const sorted = [...shipments].sort((a, b) => new Date(b.shipDate || b.createdAt) - new Date(a.shipDate || a.createdAt));
+        // Most recent shipped, with robust fallback
+        const pickDate = s => s.shippedDate ?? s.shipByDate ?? s.createdAt ?? null;
+
+        const ts = s => {
+            const t = Date.parse(pickDate(s));
+            return Number.isNaN(t) ? -Infinity : t; // put undated items at the end
+        };
+
+        const sorted = [...shipments].sort((a, b) => ts(b) - ts(a));
         return sorted[0];
     },
 
@@ -1012,13 +1020,13 @@ const invoiceProcessor = {
       const customer = customersMap[fullInvoice.CustomerRef?.value] || {};
       if (!customer.PrimaryEmail){
         console.log('No customer primary email defined. Erroring.')
-        throw({message: `Customer {0} has no primary email defined`.format(customer.DisplayName)});
+        throw({message: `Customer ${customer.DisplayName} has no primary email defined`});
       }
 
       // Exclusions
       if (customerModule.isExcludedCustomer(customer.DisplayName)) {
         console.log(`[Processor] ⚠️  Skipping invoice #${fullInvoice.DocNumber} - excluded customer`);
-        return { skipped: true, reason: `excluded_customer. The customer is: {0}`.format(customer.DisplayName) };
+        return { skipped: true, reason: `excluded_customer. The customer is: ${customer.DisplayName}` };
       }
       
       // External data (Fulcrum)
