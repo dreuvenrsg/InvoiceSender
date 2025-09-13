@@ -56,7 +56,12 @@ const config = {
   
   // Business rules
   EXCLUDED_CUSTOMERS: ['siemens', 'honeywell'], // case-insensitive
-  INCLUDED_CUSTOMERS: ['Hochiki', 'Johnson Controls Fire Protection LP']
+  INCLUDED_CUSTOMERS: ['Hochiki', 'Johnson Controls Fire Protection LP', 'Anixter'
+    , 'Tyco Fire & Security GmbH', 'Potter', 'Hager', 'HC Integrated Systems', 'Mass Merchandising'
+    , 'MIRCOM TECHNOLOGIES, LTD', 'Prudential Lighting', 'SYSTEMS DEPOT', 'Commonwealth Lock Co.',
+    'CONVERGINT TECHNOLOGIES LLC', 'Tyco Safety Products Canada Ltd', 'SECURITY DOOR CONTROL',
+    'Doorking', 'Alarmax', 'ASSOCIATED FIRE PROTECTION', 'VES FIRE DETECTION SYSTEMS'
+  ]
 };
 
 // Use sandbox by default - change this to config.production for production
@@ -580,8 +585,8 @@ const externalDataModule = {
 
   // ---------- PUBLIC ENTRY ----------
 
-  async fetchExternalDataForInvoice({ invoice, customer }) {
-    // console.log(`[Fulcrum] Starting data fetch for invoice #${invoice.DocNumber}`);
+  async fetchExternalDataForInvoice({ invoice }) {
+    console.log(`[Fulcrum] Starting data fetch for invoice #${invoice.DocNumber}`);
 
     try {
       // 1) Find the corresponding Fulcrum invoice
@@ -592,7 +597,7 @@ const externalDataModule = {
 
       if (!fulcrumInvoice) {
         console.log(`[Fulcrum] No matching Fulcrum invoice found for QBO ${invoice.Id}/${invoice.DocNumber}`);
-        return {};
+        throw({message: `[Fulcrum] No matching Fulcrum invoice found for QBO ${invoice.Id}/${invoice.DocNumber}`})
       }
     //   console.log(`[Fulcrum] Matched Fulcrum invoice ${fulcrumInvoice.id} (number ${fulcrumInvoice.number})`);
 
@@ -600,13 +605,13 @@ const externalDataModule = {
       const salesOrderId = fulcrumInvoice.salesOrderId;
       if (!salesOrderId) {
         console.log('[Fulcrum] Invoice has no salesOrderId; cannot trace shipments.');
-        return {};
+        throw({message: `[Fulcrum] Invoice has no salesOrderId; cannot trace shipments. ${invoice.Id}/${invoice.DocNumber}`})
       }
 
       const shipments = await this.listShipmentsForSalesOrder(salesOrderId);
       if (!shipments.length) {
         console.log('[Fulcrum] No shipments found for SO:', salesOrderId);
-        return {};
+        throw({message: `[Fulcrum] No shipments found for SO: ${invoice.Id}/${invoice.DocNumber}/Sales OrderId in Fulcrum:${salesOrderId}`});
       }
 
       // 3) Choose the most relevant shipment
@@ -618,7 +623,7 @@ const externalDataModule = {
 
       if (!bestShipment) {
         console.log('[Fulcrum] Could not determine a relevant shipment.');
-        return {};
+        throw({message: `[Fulcrum] Could not determine a relevant shipment: ${invoice.Id}/${invoice.DocNumber}/Sales OrderId in Fulcrum:${salesOrderId}`});
       }
 
     //   console.log(`[Fulcrum] Chosen shipment ${bestShipment.number} (${bestShipment.id}), shipDate=${bestShipment.shipDate}`);
@@ -629,10 +634,20 @@ const externalDataModule = {
         (Array.isArray(bestShipment.trackingNumbers) ? bestShipment.trackingNumbers.find(Boolean) : null) ||
         null;
 
+      if(!trackingNumber){
+        console.log(`[Fulcrum] Could not determine a trackingNumber: QBO Invoice Id: ${invoice.Id} /QBO Invoice: ${invoice.DocNumber} /Sales OrderId in Fulcrum:${salesOrderId}}`);
+        throw({message: `[Fulcrum] Could not determine a trackingNumber: QBO Invoice Id: ${invoice.Id} /QBO Invoice: ${invoice.DocNumber} /Sales OrderId in Fulcrum:${salesOrderId}}`});
+      }
+
       const shipDate = bestShipment.shippedDate || null;
       const shipMethodName = bestShipment.shippingMethod?.name || bestShipment.shippingMethodName || null;
 
       const customerPONumber = fulcrumInvoice?.customerPONumber || null;
+      
+      if(!customerPONumber){
+        console.log(`[Fulcrum] No Customer PO number configured in Fulcrum: QBO Invoice Id: ${invoice.Id} /QBO Invoice: ${invoice.DocNumber} /Sales OrderId in Fulcrum:${salesOrderId}}`);
+        throw({message: `[Fulcrum] Could find a configured PO number in Fulcrum: QBO Invoice Id: ${invoice.Id} /QBO Invoice: ${invoice.DocNumber} /Sales OrderId in Fulcrum:${salesOrderId}}`});
+      }
 
       return {
         trackingNumber,
@@ -643,7 +658,7 @@ const externalDataModule = {
 
     } catch (err) {
       console.error('[Fulcrum] Error in fetchExternalDataForInvoice:', err.message);
-      return {};
+      throw({message: JSON.stringify(err)});
     }
   },
 
@@ -988,62 +1003,39 @@ const invoiceProcessor = {
     try {
       // Get full invoice details
       const fullInvoice = await invoiceModule.getFullInvoice(invoice.Id);
-    //   F5181
-    //   F5374
-    //   F5375
+
         if(fullInvoice?.CustomField?.[0].Name !== 'P.O. Number'){
-            //note I want to log this issue and not break the program but note which invoice the value with the F in front has the issue
-            throw('WARNING PO FIELD HAS CHANGED')
+            //TODO: I want to log this issue and not break the program but note which invoice the value with the F in front has the issue
+            throw({message: 'WARNING PO FIELD HAS CHANGED, ordering'})
         }
-        if(fullInvoice?.CustomField?.[0]?.StringValue){
-            // console.log('We want to skip this invoice because it already has a PO field, Invoice number: ', fullInvoice.DocNumber);
-            return {};
-        }
-    //   if(fullInvoice.DocNumber == 'F5375'){
-    //     console.log('hello');
-    //   } else {
-    //     return;
-    //   }
+
       const customer = customersMap[fullInvoice.CustomerRef?.value] || {};
       if (!customer.PrimaryEmail){
         console.log('No customer primary email defined. Erroring.')
         throw({message: `Customer {0} has no primary email defined`.format(customer.DisplayName)});
       }
-    //   console.log(`[Processor] Invoice #${fullInvoice.DocNumber} for customer: ${customer.DisplayName || 'Unknown'}`);
-    //   console.log(`[Processor] Balance: $${fullInvoice.Balance}`);
 
       // Exclusions
       if (customerModule.isExcludedCustomer(customer.DisplayName)) {
-        // console.log(`[Processor] ⚠️  Skipping invoice #${fullInvoice.DocNumber} - excluded customer`);
-        return { skipped: true, reason: 'excluded_customer' };
-      } else {
-        console.log('Not skipping invoice');
+        console.log(`[Processor] ⚠️  Skipping invoice #${fullInvoice.DocNumber} - excluded customer`);
+        return { skipped: true, reason: `excluded_customer. The customer is: {0}`.format(customer.DisplayName) };
       }
-
+      
       // External data (Fulcrum)
     //   console.log(`[Processor] Fetching external data for tracking/shipping...`);
       const externalData = await externalDataModule.fetchExternalDataForInvoice({
-        invoice: fullInvoice,
-        customer
+        invoice: fullInvoice
       });
 
-      if(!externalData || Object.keys(externalData).length == 0){
-        //want to throw an error saying could not find tracking/shipment information in Fulcrum
-      }
-
       // Recipients
-    //   console.log(`[Processor] Preparing email recipients...`);
       const recipients = customer.PrimaryEmail ? utils.normalizeEmails(customer.PrimaryEmail) : '';
       if (!recipients) {
         console.log(`[Processor] ⚠️  Warning: No email addresses configured for customer ${customer.DisplayName}`);
-        //want to throw an error here if there are no emails configured
-      } else {
-        // console.log(`[Processor] Recipients: ${recipients}`);
+        throw({message: `No recipients to send email to for QBO. After normalizeEmail call for customer ${customer.DisplayName}`})
       }
 
-      // Tracking / Ship method / Ship date
-      const tracking = externalData?.trackingNumber || fullInvoice.TrackingNum || null;
-      if (tracking) console.log(`[Processor] Tracking number: ${tracking}`);
+      // Tracking. We specifically check for this in the fetchExternalDataForInvoice function and error if it is not present.
+      const tracking = externalData.trackingNumber;
 
     //   let shipMethodRef = fullInvoice.ShipMethodRef || null;
     //   let shipMethodText = null; // <-- declare this
@@ -1062,41 +1054,30 @@ const invoiceProcessor = {
       if (tracking)                fieldsToUpdate.TrackingNum = tracking;
       if (qboShipDate)             fieldsToUpdate.ShipDate = qboShipDate;
     //   if (shipMethodRef?.value)    fieldsToUpdate.ShipMethodRef = shipMethodRef;
-      const po = externalData?.customerPONumber?.toString().trim();
-    //   if (po) fieldsToUpdate.PONumber = po;   // omit if falsy
-    //   fieldsToUpdate.PONumber = externalData?.customerPONumber;
-    //   console.log('[PO] Before:', JSON.stringify(fullInvoice.CustomField, null, 2));
-    //   const staged = setPoCustomField(fullInvoice, externalData?.customerPONumber, fieldsToUpdate);
-      const staged = setPoCustomFieldIfBlank(fullInvoice, externalData?.customerPONumber, fieldsToUpdate);
-    //   console.log('[PO] Staged?', staged, 'Payload CF:', JSON.stringify(fieldsToUpdate.CustomField, null, 2));
-      // If ShipMethodRef couldn't be set, stash the text in PrivateNote (non-destructive)
+      // Note: We specifically check for this in the fetchExternalDataForInvoice function and error if it is not present.
+      const staged = setPoCustomFieldIfBlank(fullInvoice, externalData.customerPONumber, fieldsToUpdate);
       
       fieldsToUpdate.CustomerMemo = {value: `Ship Method: ${externalData.shipMethodName}`};
 
       // Update invoice if needed
       let updatedInvoice = fullInvoice;
       if (Object.keys(fieldsToUpdate).length) {
-        // console.log(`[Processor] Updating invoice with ${Object.keys(fieldsToUpdate).length} field(s)...`);
         updatedInvoice = await invoiceModule.updateInvoice(fullInvoice, fieldsToUpdate);
         if(updatedInvoice?.CustomField?.[0].Name !== 'P.O. Number'){
             //note I want to log this issue and not break the program but note which invoice the value with the F in front has the issue
-            throw('WARNING PO FIELD HAS CHANGED')
+            throw({message: `Either the custom field name "P.O. Number" has been changed in Fulcrum or the ordering has changed. Please see ${fullInvoice.DocNumber}`})
         }
-        if(!updatedInvoice?.CustomField?.[0]?.StringValue){
-            console.log('We need to process the following invoice manually: ', updatedInvoice.DocNumber);
-            console.log('PO num is: ', externalData?.customerPONumber?.toString());
-            return {};
+        else if(!updatedInvoice?.CustomField?.[0]?.StringValue){
+            throw({message: `We need to process the following invoice manually: ${fullInvoice.DocNumber} and the customer PO Number is: ${externalData.customerPONumber.toString()}`})
         }
-      } else {
-        // console.log(`[Processor] No updates needed for invoice`);
       }
 
       // Send
-    //   console.log(`[Processor] Sending invoice #${updatedInvoice.DocNumber}...`);
+      console.log(`[Processor] Sending invoice #${updatedInvoice.DocNumber}...`);
       await invoiceModule.sendInvoice(updatedInvoice.Id);
 
-    //   console.log(`[Processor] ✅ Successfully sent invoice #${updatedInvoice.DocNumber}`);
-    //   console.log(`[Processor] Recipients: ${updatedInvoice.BillEmail?.Address || 'None'}`);
+      console.log(`[Processor] ✅ Successfully sent invoice #${updatedInvoice.DocNumber}`);
+      console.log(`[Processor] Recipients: ${updatedInvoice.BillEmail?.Address || 'None'}`);
 
       return {
         success: true,
@@ -1105,7 +1086,7 @@ const invoiceProcessor = {
       };
 
     } catch (error) {
-    //   console.error(`[Processor] ❌ Error processing invoice:`, error.message);
+      console.error(`[Processor] ❌ Error processing invoice:`, error.message);
       throw error;
     }
   }
@@ -1138,9 +1119,9 @@ const app = {
       
       // Step 1: Get unsent invoices
       console.log('📋 Fetching unsent invoices...');
-    //   const invoices = await invoiceModule.getUnsentUnpaidInvoices();
-      const invoices = await invoiceModule.getJCIFireProtectionInvoices();
+      const invoices = await invoiceModule.getUnsentUnpaidInvoices();
       if (!invoices.length) {
+        //TODO: Send an email saying there is nothing to process
         console.log('No invoices to process.');
         console.log('\n=====================================');
         console.log('Process completed with no work to do.');
@@ -1197,7 +1178,7 @@ const app = {
             error: error.message,
             rawErrorObj: JSON.stringify(error)
           });
-          console.error(`\n❌ Failed to process invoice ID=${invoice.Id}`);
+          console.error(`\n❌ Failed to process invoice ID=${invoice.DocNumber}`);
           console.error(`Error: ${error.message}\n`);
         }
       }
@@ -1224,16 +1205,10 @@ const app = {
       
       console.log('=====================================\n');
       
-      // Save new refresh token reminder
-      if (currentRefreshToken !== activeConfig.REFRESH_TOKEN) {
-        console.log('⚠️  IMPORTANT: Update your refresh token for next run!');
-        console.log(`New refresh token: ${currentRefreshToken}`);
-        console.log('=====================================\n');
-      }
-      
       return results;
       
     } catch (error) {
+        //TODO: Try sending an email here and if it fails then just log. It's ok to crash here
       console.error('\n=====================================');
       console.error('FATAL ERROR');
       console.error('=====================================');
