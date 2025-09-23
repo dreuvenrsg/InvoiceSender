@@ -21,8 +21,10 @@ import fs from 'fs/promises';
 import path from 'path';
 import { fileURLToPath } from 'url';
 import { SSMClient, GetParameterCommand, PutParameterCommand } from "@aws-sdk/client-ssm";
+import { SESClient, SendEmailCommand } from "@aws-sdk/client-ses";
 
-const ssmClient = new SSMClient({ region: process.env.AWS_REGION || 'us-east-1' });
+const ssmClient = new SSMClient({ region: process.env.AWS_REGION || 'us-east-2' });
+const sesClient = new SESClient({ region: process.env.AWS_REGION || 'us-east-2' });
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -71,6 +73,93 @@ const config = {
   ]
 };
 
+// Email notification module
+const emailModule = {
+  fromEmail: process.env.FROM_EMAIL || 'dreuven@rsgsecurity.com',
+  toEmails: (process.env.TO_EMAILS || 'ar@rsgsecurity.com').split(',').map(e => e.trim()),
+  
+  async sendSummaryEmail(results, errors = []) {
+    const today = new Date();
+    const dateStr = today.toISOString().split("T")[0]; 
+    const subject = `QBO Invoice Processing Summary on ${dateStr} - ${results.sent} sent, ${results.skipped} skipped, ${results.errors} errors`;
+    
+    let body = `
+      QBO Invoice Processing Summary
+      ==============================
+      Date: ${new Date().toISOString()}
+      Environment: ${activeConfig === config.sandbox ? 'SANDBOX' : 'PRODUCTION'}
+
+      Results:
+      --------
+      Total processed: ${results.processed}
+      Successfully sent: ${results.sent}
+      Skipped (excluded): ${results.skipped}
+      Errors: ${results.errors}
+
+    `;
+
+    if (results.sent > 0) {
+      body += '\nSuccessfully Sent:\n';
+      results.details
+        .filter(d => d.status === 'sent')
+        .forEach(d => {
+          body += `- Invoice ${d.invoiceNumber}: sent to ${d.email}\n`;
+        });
+    }
+
+    if (results.skipped > 0) {
+      body += '\n\n\nSkipped:\n\n';
+      results.details
+        .filter(d => d.status === 'skipped')
+        .forEach(d => {
+          body += `- Invoice ${d.invoiceNumber}: skipped for customer: ${d.customer}\n`;
+        });
+    }
+
+    if (results.errors > 0) {
+      body += '\nErrors:\n';
+      results.details
+        .filter(d => d.status === 'error')
+        .forEach(d => {
+          body += `- Invoice ${d.invoiceId}: ${d.error}\n`;
+        });
+    }
+
+    if (errors.length > 0) {
+      body += '\nSystem Errors:\n';
+      errors.forEach(err => {
+        body += `- ${err}\n`;
+      });
+    }
+
+    const params = {
+      Source: this.fromEmail,
+      Destination: {
+        ToAddresses: this.toEmails
+      },
+      Message: {
+        Subject: {
+          Data: subject,
+          Charset: 'UTF-8'
+        },
+        Body: {
+          Text: {
+            Data: body,
+            Charset: 'UTF-8'
+          }
+        }
+      }
+    };
+
+    try {
+      await sesClient.send(new SendEmailCommand(params));
+      console.log('[Email] Summary email sent successfully');
+    } catch (error) {
+      console.error('[Email] Failed to send summary email:', error);
+    }
+  }
+};
+
 // Use sandbox by default - change this to config.production for production
 const activeConfig = config.production;
 let currentRefreshToken = activeConfig.REFRESH_TOKEN;
@@ -80,25 +169,35 @@ let currentRefreshToken = activeConfig.REFRESH_TOKEN;
 // ===========================
 const oauth = {
   accessToken: null,
-  tokenFilePath: path.join(__dirname, `.refresh-token-${activeConfig === config.production ? 'prod' : 'sandbox'}.txt`),
+  parameterName: `/qbo-invoice-sender/${activeConfig === config.production ? 'prod' : 'sandbox'}/refresh-token`,
   
   async loadRefreshToken() {
     try {
-      const token = await fs.readFile(this.tokenFilePath, 'utf8');
-      console.log("[OAuth] Loaded refresh token from file");
-      return token.trim();
+      const command = new GetParameterCommand({
+        Name: this.parameterName,
+        WithDecryption: true // for SecureString parameters
+      });
+      const response = await ssmClient.send(command);
+      console.log("[OAuth] Loaded refresh token from Parameter Store");
+      return response.Parameter.Value.trim();
     } catch (error) {
-      console.log("[OAuth] No token file found, using token from config");
+      console.log("[OAuth] No token in Parameter Store, using token from config");
       return activeConfig.REFRESH_TOKEN;
     }
   },
   
   async saveRefreshToken(token) {
     try {
-      await fs.writeFile(this.tokenFilePath, token, 'utf8');
-      console.log(`[OAuth] Saved refresh token to ${this.tokenFilePath}`);
+      const command = new PutParameterCommand({
+        Name: this.parameterName,
+        Value: token,
+        Type: 'SecureString',
+        Overwrite: true
+      });
+      await ssmClient.send(command);
+      console.log(`[OAuth] Saved refresh token to Parameter Store: ${this.parameterName}`);
     } catch (error) {
-      console.error("[OAuth] Failed to save refresh token to file:", error.message);
+      console.error("[OAuth] Failed to save refresh token to Parameter Store:", error.message);
     }
   },
   
@@ -1067,7 +1166,7 @@ const invoiceProcessor = {
       // Exclusions
       if (customerModule.isExcludedCustomer(customer.DisplayName)) {
         console.log(`[Processor] ⚠️  Skipping invoice #${fullInvoice.DocNumber} - excluded customer`);
-        return { skipped: true, reason: `excluded_customer. The customer is: ${customer.DisplayName}`, customer: customer.DisplayName };
+        return { skipped: true, reason: `excluded_customer. The customer is: ${customer.DisplayName}`, customer: customer.DisplayName, invoiceNumber: fullInvoice.DocNumber };
       }
       
       // External data (Fulcrum)
@@ -1402,55 +1501,33 @@ function setPoCustomFieldIfBlank(fullInvoice, poValue, fieldsToUpdate) {
   }
 }
 
-// Set "P.O. Number" in CustomField ONLY if that CF exists on the invoice and is blank.
-// Returns true if it staged an update; false otherwise.
-// function setPoCustomFieldIfBlank(fullInvoice, poValue, fieldsToUpdate, fieldName = 'P.O. Number') {
-//   const val = (poValue ?? '').toString().trim();
-//   if (!val) return false;
-
-//   // Start from staged CustomField (if any), otherwise invoice's current CustomField
-//   const base = Array.isArray(fieldsToUpdate.CustomField)
-//     ? [...fieldsToUpdate.CustomField]
-//     : (Array.isArray(fullInvoice.CustomField) ? [...fullInvoice.CustomField] : []);
-
-//   // If the CF array doesn't exist, or the PO field isn't present, do nothing
-//   if (!base.length) return false;
-
-//   const idx = base.findIndex(cf => (cf?.Name || '').toLowerCase() === fieldName.toLowerCase());
-//   if (idx === -1) return false;
-
-//   const current = (base[idx].StringValue ?? '').toString().trim();
-//   if (current) return false; // already filled
-
-//   // Update only that entry; preserve DefinitionId/Type/Name
-//   base[idx] = { ...base[idx], StringValue: val };
-//   fieldsToUpdate.CustomField = base; // IMPORTANT: send the full merged array
-//   return true;
-// }
-
-// function setPoCustomFieldIfBlank(fullInvoice, poValue, fieldsToUpdate) {
-//   const val = (poValue ?? '').toString().trim();
-//   if (!val) return false;
-
-//   const existingCF = Array.isArray(fullInvoice.CustomField) ? fullInvoice.CustomField : [];
-//   const poIdx = existingCF.findIndex(cf => (cf?.Name || '').toLowerCase() === 'p.o. number');
-
-//   if (poIdx >= 0) {
-//     const currentVal = (existingCF[poIdx].StringValue ?? '').toString().trim();
-//     // if (!currentVal) {
-//     const mergedCF = existingCF.map((cf, i) => i === poIdx ? { ...cf, StringValue: val } : cf);
-//     fieldsToUpdate.CustomField = mergedCF;
-//     return true;
-//     // }
-//     return false;
-//   } else {
-//     const existingNote = fullInvoice.PrivateNote || '';
-//     const noteLine = `PO: ${val}`;
-//     if (!existingNote.includes(noteLine)) {
-//       const sep = existingNote ? ' | ' : '';
-//       fieldsToUpdate.PrivateNote = (existingNote + sep + noteLine).slice(0, 4000);
-//       return true;
-//     }
-//     return false;
-//   }
-// }
+// Lambda handler
+export const handler = async (event, context) => {
+  console.log('Lambda execution started', { event, context });
+  
+  let results;
+  let systemErrors = [];
+  
+  try {
+    results = await app.run();
+    await emailModule.sendSummaryEmail(results, systemErrors);
+    
+    return {
+      statusCode: 200,
+      body: JSON.stringify({
+        message: 'QBO invoice processing completed',
+        results
+      })
+    };
+  } catch (error) {
+    systemErrors.push(`Fatal error: ${error.message}`);
+    
+    // Send error notification
+    await emailModule.sendSummaryEmail(
+      results || { processed: 0, sent: 0, skipped: 0, errors: 0, details: [] },
+      systemErrors
+    );
+    
+    throw error; // Let Lambda handle the error
+  }
+};

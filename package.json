@@ -1,11 +1,29 @@
 {
   "name": "InvoiceSender",
   "version": "1.0.0",
+  "type": "module",
   "main": "index.js",
   "repository": "https://github.com/dreuvenrsg/InvoiceSender.git",
   "author": "Doron Reuven <dreuven@rsgsecurity.com>",
   "license": "MIT",
+  "scripts": {
+    "clean": "rm -rf dist && rm -f function.zip",
+    "build": "npm run clean && mkdir -p dist && cp V2_emailSender.js dist/index.js && cp package*.json dist/",
+    "install-prod": "cd dist && npm install --omit=dev",
+    "zip": "cd dist && zip -r ../function.zip .",
+    "package": "npm run build && npm run install-prod && npm run zip",
+    "deploy": "aws lambda update-function-code --function-name $LAMBDA_FUNCTION_NAME --zip-file fileb://function.zip",
+    "create-function": "aws lambda create-function --function-name $LAMBDA_FUNCTION_NAME --runtime nodejs20.x --role $LAMBDA_ROLE_ARN --handler index.handler --timeout 300 --memory-size 512 --zip-file fileb://function.zip",
+    "update-env": "aws lambda update-function-configuration --function-name $LAMBDA_FUNCTION_NAME --environment Variables='{FROM_EMAIL='\"$FROM_EMAIL\"',TO_EMAILS='\"$TO_EMAILS\"',AWS_REGION='\"$AWS_REGION\"'}'",
+    "deploy-all": "source .env && npm run package && npm run deploy",
+    "deploy-new": "npm run package && npm run create-function && npm run update-env",
+    "logs": "aws logs tail /aws/lambda/$LAMBDA_FUNCTION_NAME --follow",
+    "test-local": "node --experimental-modules V2_emailSender.js",
+    "invoke": "aws lambda invoke --function-name $LAMBDA_FUNCTION_NAME --payload '{}' output.json && cat output.json && rm output.json"
+  },
   "dependencies": {
-    "node-fetch": "^3.3.2"
+    "node-fetch": "^3.3.2",
+    "@aws-sdk/client-ssm": "^3.0.0",
+    "@aws-sdk/client-ses": "^3.0.0"
   }
 }
