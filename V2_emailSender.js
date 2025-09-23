@@ -20,6 +20,9 @@ import fetch from "node-fetch";
 import fs from 'fs/promises';
 import path from 'path';
 import { fileURLToPath } from 'url';
+import { SSMClient, GetParameterCommand, PutParameterCommand } from "@aws-sdk/client-ssm";
+
+const ssmClient = new SSMClient({ region: process.env.AWS_REGION || 'us-east-1' });
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -60,7 +63,11 @@ const config = {
     , 'Tyco Fire & Security GmbH', 'Potter', 'Hager', 'HC Integrated Systems', 'Mass Merchandising'
     , 'MIRCOM TECHNOLOGIES, LTD', 'Prudential Lighting', 'SYSTEMS DEPOT', 'Commonwealth Lock Co.',
     'CONVERGINT TECHNOLOGIES LLC', 'Tyco Safety Products Canada Ltd', 'SECURITY DOOR CONTROL',
-    'Doorking', 'Alarmax', 'ASSOCIATED FIRE PROTECTION', 'VES FIRE DETECTION SYSTEMS'
+    'Doorking', 'Alarmax', 'ASSOCIATED FIRE PROTECTION', 'VES FIRE DETECTION SYSTEMS', '3S INCORPORATED'
+    , 'ADI/TEXAS', 'Fire Device Company', 'Dortronics', 'MAMMOTH FIRE', 'Main Fire & Security'
+    , 'DOORTEK SYSTEMS', 'BROOKS EQUIPMENT CO.', 'Killark', 'EZ Fire Inc', 'MONACO ENTERPRISES'
+    , 'HLI Solutions, Inc.', 'HIGH RISE PROTECTION', 'US ALARM & DETECTION SUPPLY, LLC', 'FIKE CORPORATION'
+    , 'HUBBELL CARIBE LIMITED', 'Life Safety Consultants', 'FIRE ALARM.COM', 'UNICOM INC.'
   ]
 };
 
@@ -705,7 +712,9 @@ const externalDataModule = {
   // ---------- FULCRUM LIST HELPERS (robust pagination) ----------
 
   // ---- Replace your pagedList with this version ----
-  async pagedList(endpoint, baseBody = {}, { pageSize = 50, max = 5000, forceRefresh = false } = {}) {
+  //NOTE: PAY ATTENTION TO THE MAX NUMBER OF SHIPMENTS CONFIGURED. IF SURPASSED, IT WILL NOT RETRIEVE ALL ITEMS
+  //AND THEREFORE WILL BE MISSING FROM THE RETURN.
+  async pagedList(endpoint, baseBody = {}, { pageSize = 50, max = 5000000, forceRefresh = false } = {}) {
     // Decide which cache bucket + key to use based on endpoint
     let store = this._pagedCache[endpoint];
     let key = 'ALL'; // default key for single-bucket endpoints
@@ -872,6 +881,38 @@ const externalDataModule = {
     async chooseShipment({ shipments, qbInvoice, fulcrumInvoice }) {
         if (!shipments.length) return null;
 
+        // Check for duplicate ship dates on the last two shipments
+        if (shipments.length >= 2) {
+            // Sort by shipment number to get the most recent ones
+            const sortedByNumber = [...shipments].sort((a, b) => {
+                const getShipmentNumber = (shipment) => {
+                    const match = (shipment.name || '').match(/-(\d+)$/);
+                    return match ? parseInt(match[1]) : 0;
+                };
+                return getShipmentNumber(b) - getShipmentNumber(a);
+            });
+
+            // Get the last two shipments
+            const lastTwo = sortedByNumber.slice(0, 2);
+            
+            // Compare their shipped dates
+            const date1 = lastTwo[0].shippedDate;
+            const date2 = lastTwo[1].shippedDate;
+            
+            if (date1 && date2) {
+                // Convert to date strings for comparison (ignoring time)
+                const dateStr1 = new Date(date1).toISOString().split('T')[0];
+                const dateStr2 = new Date(date2).toISOString().split('T')[0];
+                
+                if (dateStr1 === dateStr2) {
+                    const errorMsg = `[Fulcrum] Multiple shipments with same date detected. ` +
+                        `Shipments ${lastTwo[0].name} and ${lastTwo[1].name} both shipped on ${dateStr1}. ` +
+                        `QBO Invoice: ${qbInvoice.DocNumber}, Fulcrum Invoice: ${fulcrumInvoice.number}`;
+                    console.error(errorMsg);
+                    throw({message: errorMsg});
+                }
+            }
+        }
         // 0) Prefer shipments that explicitly reference this invoice
         const linked = [];
         for (const s of shipments) {
@@ -895,8 +936,8 @@ const externalDataModule = {
         }
 
         if (linked.length) {
-        linked.sort((a, b) => new Date(b.shipDate || b.createdAt) - new Date(a.shipDate || a.createdAt));
-        return linked[0];
+          linked.sort((a, b) => new Date(b.shipDate || b.createdAt) - new Date(a.shipDate || a.createdAt));
+          return linked[0];
         }
 
         // 1) Score by line-item overlap, then by proximity to invoice date
@@ -904,20 +945,20 @@ const externalDataModule = {
         const scored = [];
 
         for (const s of shipments) {
-        const full = await this.getShipmentById(s.id).catch(() => null);
-        if (!full) continue;
-        const lineItems = full._lineItems || await this.listShipmentLineItems(full.id);
-        const shipTokens = this.tokensFromShipmentLines(lineItems);
+          const full = await this.getShipmentById(s.id).catch(() => null);
+          if (!full) continue;
+          const lineItems = full._lineItems || await this.listShipmentLineItems(full.id);
+          const shipTokens = this.tokensFromShipmentLines(lineItems);
 
-        const overlap = this.jaccard(qbTokens, shipTokens);
-        const dateScore = this.dateProximityScore(new Date(full.shipDate || full.createdAt), qbInvoice.TxnDate);
+          const overlap = this.jaccard(qbTokens, shipTokens);
+          const dateScore = this.dateProximityScore(new Date(full.shipDate || full.createdAt), qbInvoice.TxnDate);
 
-        scored.push({ full, overlap, dateScore });
+          scored.push({ full, overlap, dateScore });
         }
 
         if (scored.length) {
-        scored.sort((a, b) => (b.overlap - a.overlap) || (b.dateScore - a.dateScore));
-        return scored[0].full;
+          scored.sort((a, b) => (b.overlap - a.overlap) || (b.dateScore - a.dateScore));
+          return scored[0].full;
         }
 
         // 2) Fallback: most recent shipped
@@ -1026,7 +1067,7 @@ const invoiceProcessor = {
       // Exclusions
       if (customerModule.isExcludedCustomer(customer.DisplayName)) {
         console.log(`[Processor] ⚠️  Skipping invoice #${fullInvoice.DocNumber} - excluded customer`);
-        return { skipped: true, reason: `excluded_customer. The customer is: ${customer.DisplayName}` };
+        return { skipped: true, reason: `excluded_customer. The customer is: ${customer.DisplayName}`, customer: customer.DisplayName };
       }
       
       // External data (Fulcrum)
@@ -1076,7 +1117,9 @@ const invoiceProcessor = {
             throw({message: `Either the custom field name "P.O. Number" has been changed in Fulcrum or the ordering has changed. Please see ${fullInvoice.DocNumber}`})
         }
         else if(!updatedInvoice?.CustomField?.[0]?.StringValue){
-            throw({message: `We need to process the following invoice manually: ${fullInvoice.DocNumber} and the customer PO Number is: ${externalData.customerPONumber.toString()}`})
+            throw({message: `We need to process the following invoice manually. No PO value: ${fullInvoice.DocNumber} and the customer PO Number is: ${externalData.customerPONumber.toString()}`})
+        } else if(!updatedInvoice?.TrackingNum){
+          throw({message: `We need to process the following invoice manually. No Tracking number: ${fullInvoice.DocNumber} and the customer PO Number is: ${externalData.customerPONumber.toString()}`})
         }
       }
 
@@ -1160,14 +1203,14 @@ const app = {
         results.processed++;
         
         try {
-          const result = await invoiceProcessor.processInvoice(invoice, customersMap);
-          
+          const result = await invoiceProcessor.processInvoice(invoice, customersMap);          
           if (result.skipped) {
             results.skipped++;
             results.details.push({
               invoiceId: invoice.Id,
               status: 'skipped',
-              reason: result.reason
+              reason: result.reason,
+              customer: result.customer
             });
           } else if (result.success) {
             results.sent++;
