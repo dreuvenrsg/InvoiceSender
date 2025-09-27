@@ -70,6 +70,7 @@ const config = {
     , 'DOORTEK SYSTEMS', 'BROOKS EQUIPMENT CO.', 'Killark', 'EZ Fire Inc', 'MONACO ENTERPRISES'
     , 'HLI Solutions, Inc.', 'HIGH RISE PROTECTION', 'US ALARM & DETECTION SUPPLY, LLC', 'FIKE CORPORATION'
     , 'HUBBELL CARIBE LIMITED', 'Life Safety Consultants', 'FIRE ALARM.COM', 'UNICOM INC.'
+    , 'OMLID & SWINNEY'
   ]
 };
 
@@ -1166,7 +1167,10 @@ const invoiceProcessor = {
       // Exclusions
       if (customerModule.isExcludedCustomer(customer.DisplayName)) {
         console.log(`[Processor] ⚠️  Skipping invoice #${fullInvoice.DocNumber} - excluded customer`);
-        return { skipped: true, reason: `excluded_customer. The customer is: ${customer.DisplayName}`, customer: customer.DisplayName, invoiceNumber: fullInvoice.DocNumber };
+        return { 
+            skipped: true, reason: `excluded_customer. The customer is: ${customer.DisplayName}`
+          , customer: customer.DisplayName, invoiceNumber: fullInvoice.DocNumber 
+        };
       }
       
       // External data (Fulcrum)
