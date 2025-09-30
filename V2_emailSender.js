@@ -17,17 +17,12 @@ https://appcenter.intuit.com/connect/oauth2
 */
 import fetch from "node-fetch";
 // Add these imports at the top of your main file
-import fs from 'fs/promises';
-import path from 'path';
-import { fileURLToPath } from 'url';
 import { SSMClient, GetParameterCommand, PutParameterCommand } from "@aws-sdk/client-ssm";
 import { SESClient, SendEmailCommand } from "@aws-sdk/client-ses";
 
 const ssmClient = new SSMClient({ region: process.env.AWS_REGION || 'us-east-2' });
 const sesClient = new SESClient({ region: process.env.AWS_REGION || 'us-east-2' });
 
-const __filename = fileURLToPath(import.meta.url);
-const __dirname = path.dirname(__filename);
 // ===========================
 // Configuration Module
 // ===========================
@@ -117,14 +112,41 @@ const emailModule = {
         });
     }
 
+    // ---- Updated error section (aggregate unique customers, exclude Siemens/Honeywell) ----
     if (results.errors > 0) {
+      const EXCLUDES = ['siemens', 'honeywell'];
+
+      const isExcluded = (name) => {
+        if (!name) return false;
+        const n = String(name).toLowerCase();
+        return EXCLUDES.some(x => n.includes(x));
+      };
+
+      // Build a unique, sorted set of customers with errors, excluding Siemens/Honeywell
+      const errorCustomerSet = new Set(
+        results.details
+          .filter(d => d.status === 'error' && d.customer && !isExcluded(d.customer))
+          .map(d => String(d.customer).trim())
+      );
+
+      const errorCustomers = Array.from(errorCustomerSet).sort((a, b) =>
+        a.localeCompare(b, undefined, { sensitivity: 'base' })
+      );
+
       body += '\nErrors:\n';
-      results.details
-        .filter(d => d.status === 'error')
-        .forEach(d => {
-          body += `- Invoice ${d.invoiceId}: ${d.error}\n`;
+
+      if (errorCustomers.length > 0) {
+        body += 'Customers with errors (excluding Siemens/Honeywell):\n';
+        errorCustomers.forEach(name => {
+          body += `- ${name}\n`;
         });
+        body += `\nUnique customer count (post-exclusions): ${errorCustomers.length}\n`;
+      } else {
+        body += 'Customers with errors (excluding Siemens/Honeywell): None\n';
+        body += '(All error entries were for excluded customers)\n';
+      }
     }
+    // ---- End updated section ----
 
     if (errors.length > 0) {
       body += '\nSystem Errors:\n';
