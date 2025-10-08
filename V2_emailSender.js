@@ -66,6 +66,8 @@ const config = {
     , 'HLI Solutions, Inc.', 'HIGH RISE PROTECTION', 'US ALARM & DETECTION SUPPLY, LLC', 'FIKE CORPORATION'
     , 'HUBBELL CARIBE LIMITED', 'Life Safety Consultants', 'FIRE ALARM.COM', 'UNICOM INC.'
     , 'OMLID & SWINNEY', 'MADISON SERVICE CORP.', 'SECURE DOOR & HARDWARE'
+    , 'TOMCO SYSTEMS', 'RAVEL ELECTRONICS PVT LTD', 'TOTAL DOOR, AN OPENINGS COMPANY'
+    , 'SECURITY DATA SUPPLY, LLC', 'MIRCOM INC.'
   ]
 };
 
@@ -108,51 +110,19 @@ const emailModule = {
       results.details
         .filter(d => d.status === 'skipped')
         .forEach(d => {
-          body += `- Invoice ${d.invoiceNumber}: skipped for customer: ${d.customer}\n`;
+          if(!(d.customer.toLowerCase().includes('siemens') || d.customer.toLowerCase().includes('siemens'))){
+            body += `- Invoice ${d.invoiceNumber}: skipped for customer: ${d.customer}\n`;
+          }
         });
     }
 
-    // ---- Updated error section (aggregate unique customers, exclude Siemens/Honeywell) ----
     if (results.errors > 0) {
-      const EXCLUDES = ['siemens', 'honeywell'];
-
-      const isExcluded = (name) => {
-        if (!name) return false;
-        const n = String(name).toLowerCase();
-        return EXCLUDES.some(x => n.includes(x));
-      };
-
-      // Build a unique, sorted set of customers with errors, excluding Siemens/Honeywell
-      const errorCustomerSet = new Set(
+        console.log('\nERROR DETAILS:');
         results.details
-          .filter(d => d.status === 'error' && d.customer && !isExcluded(d.customer))
-          .map(d => String(d.customer).trim())
-      );
-
-      const errorCustomers = Array.from(errorCustomerSet).sort((a, b) =>
-        a.localeCompare(b, undefined, { sensitivity: 'base' })
-      );
-
-      body += '\nErrors:\n';
-
-      if (errorCustomers.length > 0) {
-        body += 'Customers with errors (excluding Siemens/Honeywell):\n';
-        errorCustomers.forEach(name => {
-          body += `- ${name}\n`;
-        });
-        body += `\nUnique customer count (post-exclusions): ${errorCustomers.length}\n`;
-      } else {
-        body += 'Customers with errors (excluding Siemens/Honeywell): None\n';
-        body += '(All error entries were for excluded customers)\n';
-      }
-    }
-    // ---- End updated section ----
-
-    if (errors.length > 0) {
-      body += '\nSystem Errors:\n';
-      errors.forEach(err => {
-        body += `- ${err}\n`;
-      });
+          .filter(d => d.status === 'error')
+          .forEach(d => {
+            console.log(`- Invoice ${d.invoiceId}: ${d.error}`);
+          });
     }
 
     const params = {
