@@ -111,7 +111,7 @@ const emailModule = {
         .filter(d => d.status === 'skipped')
         .forEach(d => {
           if(!(d.customer.toLowerCase().includes('siemens') || d.customer.toLowerCase().includes('siemens'))){
-            body += `- Invoice ${d.invoiceNumber}: skipped for customer: ${d.customer}\n`;
+            body += `- Skipped for customer: ${d.customer}\n`;
           }
         });
     }
