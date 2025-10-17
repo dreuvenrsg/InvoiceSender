@@ -68,6 +68,9 @@ const config = {
     , 'OMLID & SWINNEY', 'MADISON SERVICE CORP.', 'SECURE DOOR & HARDWARE'
     , 'TOMCO SYSTEMS', 'RAVEL ELECTRONICS PVT LTD', 'TOTAL DOOR, AN OPENINGS COMPANY'
     , 'SECURITY DATA SUPPLY, LLC', 'MIRCOM INC.', 'Casey Fire Systems, Inc'
+    , 'TSS INTEGRATED SYSTEMS', 'Interlog Corporation', 'DOOR SYSTEMS INC.'
+    , 'ACCESS HARDWARE', 'GENERAL MONITORS SYSTEMS', 'SYSTEM DISTRIBUTORS'
+    , 'CB Doors and Hardware, Inc.'
   ]
 };
 
@@ -76,7 +79,7 @@ const emailModule = {
   fromEmail: process.env.FROM_EMAIL || 'dreuven@rsgsecurity.com',
   toEmails: (process.env.TO_EMAILS || 'ar@rsgsecurity.com').split(',').map(e => e.trim()),
   
-  async sendSummaryEmail(results, errors = []) {
+  async sendSummaryEmail(results) {
     const today = new Date();
     const dateStr = today.toISOString().split("T")[0]; 
     const subject = `QBO Invoice Processing Summary on ${dateStr} - ${results.sent} sent, ${results.skipped} skipped, ${results.errors} errors`;
@@ -110,18 +113,18 @@ const emailModule = {
       results.details
         .filter(d => d.status === 'skipped')
         .forEach(d => {
-          if(!(d.customer.toLowerCase().includes('siemens') || d.customer.toLowerCase().includes('siemens'))){
-            body += `- Skipped for customer: ${d.customer}\n`;
+          if(!(d.customer.toLowerCase().includes('honeywell') || d.customer.toLowerCase().includes('siemens'))){
+            body += `- Skipped invoice: ${d.invoiceId} for customer: ${d.customer} and was skipped because reason: ${d.reason}\n`;
           }
         });
     }
 
     if (results.errors > 0) {
-        console.log('\nERROR DETAILS:');
+        body += '\n\n\n ERROR DETAILS:\n\n';
         results.details
           .filter(d => d.status === 'error')
           .forEach(d => {
-            console.log(`- Invoice ${d.invoiceId}: ${d.error}`);
+            body += `- Error with invoice: ${d.invoiceId} with error: ${d.error}\n`;
           });
     }
 
@@ -675,7 +678,7 @@ const externalDataModule = {
         console.log('[Fulcrum] pagedList cache cleared');
     },
 
-    async prewarmInvoicesCache({ forceRefresh = false, max = 500000 } = {}) {
+    async prewarmInvoicesCache({ forceRefresh = false, max = 50000000 } = {}) {
     // console.log(`[Fulcrum] Prewarming invoice cache (forceRefresh=${!!forceRefresh})`);
     const res = await this.getAllInvoices(max, { useCache: true, forceRefresh });
     // console.log(`[Fulcrum] Invoice cache size: ${res.length}`);
@@ -913,7 +916,7 @@ const externalDataModule = {
     },
 
     // Fetch all invoices once per run (memoized via pagedList’s internal cache)
-    async getAllInvoices(max = 500000, { forceRefresh = false } = {}) {
+    async getAllInvoices(max = 50000000, { forceRefresh = false } = {}) {
         const invoices = await this.pagedList(
             '/invoices/list',
             { 'Sort.Field': 'issueDate', 'Sort.Dir': 'descending' },
@@ -1374,7 +1377,8 @@ const app = {
 if (import.meta.url === `file://${process.argv[1]}`) {
   app.run()
     .then(results => {
-      process.exit(results.errors > 0 ? 1 : 0);
+      emailModule.sendSummaryEmail(results);
+      // process.exit(results.errors > 0 ? 1 : 0);
     })
     .catch(err => {
       console.error(err);
@@ -1502,11 +1506,10 @@ export const handler = async (event, context) => {
   console.log('Lambda execution started', { event, context });
   
   let results;
-  let systemErrors = [];
   
   try {
     results = await app.run();
-    await emailModule.sendSummaryEmail(results, systemErrors);
+    await emailModule.sendSummaryEmail(results);
     
     return {
       statusCode: 200,
@@ -1520,8 +1523,7 @@ export const handler = async (event, context) => {
     
     // Send error notification
     await emailModule.sendSummaryEmail(
-      results || { processed: 0, sent: 0, skipped: 0, errors: 0, details: [] },
-      systemErrors
+      results || { processed: 0, sent: 0, skipped: 0, errors: 0, details: [] }
     );
     
     throw error; // Let Lambda handle the error
