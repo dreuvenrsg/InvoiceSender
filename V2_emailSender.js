@@ -70,7 +70,7 @@ const config = {
     , 'SECURITY DATA SUPPLY, LLC', 'MIRCOM INC.', 'Casey Fire Systems, Inc'
     , 'TSS INTEGRATED SYSTEMS', 'Interlog Corporation', 'DOOR SYSTEMS INC.'
     , 'ACCESS HARDWARE', 'GENERAL MONITORS SYSTEMS', 'SYSTEM DISTRIBUTORS'
-    , 'CB Doors and Hardware, Inc.'
+    , 'CB Doors and Hardware, Inc.', 'Kidde Edwards'
   ]
 };
 
