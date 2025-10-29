@@ -1,0 +1,75 @@
+service: rsg-invoice-processor
+
+provider:
+  name: aws
+  runtime: nodejs22.x
+  region: us-east-2
+  memorySize: 3008
+  timeout: 900
+  architecture: x86_64
+  
+  environment:
+    FROM_EMAIL: ${env:FROM_EMAIL, 'dreuven@rsgsecurity.com'}
+    TO_EMAILS: ${env:TO_EMAILS, 'ar@rsgsecurity.com'}
+    AWS_REGION: ${env:AWS_REGION, 'us-east-2'}
+  
+  iam:
+    role:
+      statements:
+        - Effect: Allow
+          Action:
+            - ssm:GetParameter
+            - ssm:PutParameter
+          Resource:
+            - arn:aws:ssm:${self:provider.region}:*:parameter/qbo-invoice-sender/*
+        
+        - Effect: Allow
+          Action:
+            - ses:SendEmail
+          Resource: '*'
+        
+        - Effect: Allow
+          Action:
+            - logs:CreateLogGroup
+            - logs:CreateLogStream
+            - logs:PutLogEvents
+          Resource: '*'
+  
+  ephemeralStorageSize: 2048
+
+functions:
+  invoiceProcessor:
+    handler: V2_emailSender.handler
+    name: RSGInvoiceProcessor
+    description: Automated invoice processing - Fulcrum creation + QBO sending
+    
+    layers:
+      - arn:aws:lambda:${self:provider.region}:041475135427:layer:chrome-aws-lambda:42
+    
+    events:
+      # Uncomment to enable scheduled execution (daily at 10 AM UTC)
+      # - schedule:
+      #     rate: cron(0 10 * * ? *)
+      #     input:
+      #       fulcrumUsername: dreuven@rsgsecurity.com
+      #       fulcrumPassword: YOUR_PASSWORD_HERE
+
+package:
+  patterns:
+    - '!node_modules/puppeteer/**'
+    - '!.env*'
+    - '!*.md'
+    - '!deploy.sh'
+    - '!template.yaml'
+    - '!.git/**'
+    - '!.vscode/**'
+    - '!.idea/**'
+    - '!dist/**'
+    - '!*.zip'
+
+plugins:
+  - serverless-offline
+
+custom:
+  serverless-offline:
+    httpPort: 3000

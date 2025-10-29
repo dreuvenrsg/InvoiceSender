@@ -1,0 +1,110 @@
+# AWS SAM Template - RSG Invoice Sender with Fulcrum Integration
+# Updated to support browser automation (Puppeteer + Chromium)
+
+AWSTemplateFormatVersion: '2010-09-09'
+Transform: AWS::Serverless-2016-10-31
+Description: RSG Invoice Sender - Fulcrum + QBO Integration
+
+Resources:
+  RSGInvoiceSender:
+    Type: AWS::Serverless::Function
+    Properties:
+      CodeUri: .
+      Description: Automated invoice processing - Fulcrum creation + QBO sending
+      
+      # INCREASED MEMORY - Chromium requires significant memory
+      MemorySize: 3008
+      
+      # 15 minutes timeout for browser automation
+      Timeout: 900
+      
+      Handler: index.handler
+      Runtime: nodejs22.x
+      Architectures:
+        - x86_64
+      
+      # Increased storage for Chromium
+      EphemeralStorage:
+        Size: 2048
+      
+      Environment:
+        Variables:
+          FROM_EMAIL: dreuven@rsgsecurity.com
+          TO_EMAILS: ar@rsgsecurity.com
+          # NOTE: Fulcrum credentials should be passed in the event payload
+          # or stored in AWS Secrets Manager (not in environment variables)
+      
+      # CHROMIUM LAYER - Required for browser automation
+      # This public layer includes a pre-built Chromium binary optimized for Lambda
+      Layers:
+        - arn:aws:lambda:us-east-2:041475135427:layer:chrome-aws-lambda:42
+      
+      EventInvokeConfig:
+        MaximumEventAgeInSeconds: 21600
+        MaximumRetryAttempts: 2
+      
+      PackageType: Zip
+      
+      # IAM Permissions
+      Policies:
+        - Statement:
+            # SSM Parameter Store (for QBO tokens)
+            - Effect: Allow
+              Action:
+                - ssm:GetParameter
+                - ssm:PutParameter
+              Resource:
+                - arn:aws:ssm:*:*:parameter/qbo-invoice-sender/*
+            
+            # SES (for email notifications)
+            - Effect: Allow
+              Action:
+                - ses:SendEmail
+              Resource: '*'
+            
+            # CloudWatch Logs (for monitoring)
+            - Effect: Allow
+              Action:
+                - logs:CreateLogGroup
+                - logs:CreateLogStream
+                - logs:PutLogEvents
+              Resource: '*'
+      
+      RecursiveLoop: Terminate
+      SnapStart:
+        ApplyOn: None
+      RuntimeManagementConfig:
+        UpdateRuntimeOn: Auto
+
+# Optional: EventBridge Schedule (uncomment to enable)
+#  InvoiceSchedule:
+#    Type: AWS::Events::Rule
+#    Properties:
+#      Description: Daily invoice processing at 10 AM
+#      ScheduleExpression: cron(0 10 * * ? *)
+#      State: ENABLED
+#      Targets:
+#        - Arn: !GetAtt RSGInvoiceSender.Arn
+#          Id: InvoiceProcessorTarget
+#          Input: |
+#            {
+#              "fulcrumUsername": "dreuven@rsgsecurity.com",
+#              "fulcrumPassword": "YOUR_PASSWORD_HERE"
+#            }
+#
+#  InvoiceSchedulePermission:
+#    Type: AWS::Lambda::Permission
+#    Properties:
+#      FunctionName: !Ref RSGInvoiceSender
+#      Action: lambda:InvokeFunction
+#      Principal: events.amazonaws.com
+#      SourceArn: !GetAtt InvoiceSchedule.Arn
+
+Outputs:
+  FunctionArn:
+    Description: Lambda Function ARN
+    Value: !GetAtt RSGInvoiceSender.Arn
+  
+  FunctionName:
+    Description: Lambda Function Name
+    Value: !Ref RSGInvoiceSender

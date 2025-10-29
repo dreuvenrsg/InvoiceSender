@@ -15,6 +15,7 @@ https://appcenter.intuit.com/connect/oauth2
   &redirect_uri=https://developer.intuit.com/v2/OAuth2Playground/RedirectUrl
   &state=xyz123
 */
+import { runFulcrumProcessor } from './fulcrumProcessor.js';
 import fetch from "node-fetch";
 // Add these imports at the top of your main file
 import { SSMClient, GetParameterCommand, PutParameterCommand } from "@aws-sdk/client-ssm";
@@ -79,12 +80,38 @@ const emailModule = {
   fromEmail: process.env.FROM_EMAIL || 'dreuven@rsgsecurity.com',
   toEmails: (process.env.TO_EMAILS || 'ar@rsgsecurity.com').split(',').map(e => e.trim()),
   
-  async sendSummaryEmail(results) {
+  async sendSummaryEmail(results, fulcrumResults = null) {
     const today = new Date();
     const dateStr = today.toISOString().split("T")[0]; 
     const subject = `QBO Invoice Processing Summary on ${dateStr} - ${results.sent} sent, ${results.skipped} skipped, ${results.errors} errors`;
     
-    let body = `
+    var body = "";
+    if(fulcrumResults){
+      body = `
+        Fulcrum Sending Results
+        ========================
+        ${fulcrumResults.processedInvoices.length} invoices processed
+        ${fulcrumResults.errors.length} errors
+        The errors are: ${fulcrumResults.errors}
+        
+      `
+      if (fulcrumResults.processedInvoices.length > 0) {
+        body += 'Processed Invoices:\n';
+        fulcrumResults.processedInvoices.forEach(inv => {
+          body += `- SO ${inv.soNumber}: ${inv.action} (Balance: $${inv.balance}, Total: $${inv.total})\n`;
+        });
+        body += '\n';
+      }
+
+      if (fulcrumResults.errors.length > 0) {
+        body += '\n⚠️ FULCRUM ERRORS:\n';
+        fulcrumResults.errors.forEach(err => {
+          body += `- ${err}\n`;
+        });
+        body += '\n';
+      }
+    }
+    body += `
       QBO Invoice Processing Summary
       ==============================
       Date: ${new Date().toISOString()}
@@ -1371,19 +1398,42 @@ const app = {
   }
 };
 
-// ===========================
-// Entry Point
-// ===========================
+// ============================================
+// LOCAL EXECUTION (for testing)
+// ============================================
 if (import.meta.url === `file://${process.argv[1]}`) {
-  app.run()
-    .then(results => {
-      emailModule.sendSummaryEmail(results);
-      // process.exit(results.errors > 0 ? 1 : 0);
-    })
-    .catch(err => {
-      console.error(err);
+  (async () => {
+    console.log('[Local] Running in local mode...\n');
+    
+    let fulcrumResults = null;
+    
+    try {
+      const fulcrumUsername = process.env.FULCRUM_USERNAME || 'dreuven@rsgsecurity.com';
+      const fulcrumPassword = process.env.FULCRUM_PASSWORD || 'Levered76!';
+      
+      if (fulcrumUsername && fulcrumPassword) {
+        console.log('🤖 Running Fulcrum processor (visible browser)...\n');
+        fulcrumResults = await runFulcrumProcessor(
+          fulcrumUsername,
+          fulcrumPassword,
+          false // headless=false for local (visible browser)
+        );
+      }
+      
+      console.log('\n📧 Running QBO processor...\n');
+      const qboResults = await app.run();
+      
+      await emailModule.sendSummaryEmail(qboResults, fulcrumResults);
+      
+      console.log('\n✓ Local execution completed\n');
+      
+      process.exit(qboResults.errors > 0 || (fulcrumResults && fulcrumResults.errors.length > 0) ? 1 : 0);
+      
+    } catch (err) {
+      console.error('\n✗ Local execution failed:', err);
       process.exit(1);
-    });
+    }
+  })();
 }
 
 // Export modules for testing or external use
@@ -1503,29 +1553,86 @@ function setPoCustomFieldIfBlank(fullInvoice, poValue, fieldsToUpdate) {
 
 // Lambda handler
 export const handler = async (event, context) => {
-  console.log('Lambda execution started', { event, context });
+  console.log('[Lambda] Starting invoice processing...');
   
-  let results;
+  let qboResults;
+  let fulcrumResults = null;
   
   try {
-    results = await app.run();
-    await emailModule.sendSummaryEmail(results);
+    // =====================================
+    // STAGE 1: FULCRUM PROCESSING
+    // =====================================
+    console.log('\n🤖 Stage 1: Fulcrum Invoice Processing\n');
+    
+    const fulcrumUsername = event.fulcrumUsername || event.FULCRUM_USERNAME || process.env.FULCRUM_USERNAME;
+    const fulcrumPassword = event.fulcrumPassword || event.FULCRUM_PASSWORD || process.env.FULCRUM_PASSWORD;
+    
+    if (!fulcrumUsername || !fulcrumPassword) {
+      console.warn('[Fulcrum] Credentials not provided, skipping Fulcrum processing');
+      console.warn('[Fulcrum] Pass credentials in event: { fulcrumUsername, fulcrumPassword }');
+    } else {
+      try {
+        fulcrumResults = await runFulcrumProcessor(
+          fulcrumUsername,
+          fulcrumPassword,
+          true // headless mode for Lambda
+        );
+        
+        console.log(`\n[Fulcrum] Completed - ${fulcrumResults.processedInvoices.length} processed, ${fulcrumResults.errors.length} errors\n`);
+      } catch (fulcrumError) {
+        console.error('[Fulcrum] Processing failed:', fulcrumError);
+        fulcrumResults = {
+          processedInvoices: [],
+          errors: [`Fatal Fulcrum error: ${fulcrumError.message}`],
+          success: false
+        };
+      }
+    }
+    
+    // =====================================
+    // STAGE 2: QBO PROCESSING
+    // =====================================
+    console.log('\n📧 Stage 2: QBO Invoice Sending\n');
+    
+    qboResults = await app.run();
+    
+    console.log(`\n[QBO] Completed - ${qboResults.sent} sent, ${qboResults.errors} errors\n`);
+    
+    // =====================================
+    // SEND COMBINED EMAIL SUMMARY
+    // =====================================
+    await emailModule.sendSummaryEmail(qboResults, fulcrumResults);
     
     return {
       statusCode: 200,
       body: JSON.stringify({
-        message: 'QBO invoice processing completed',
-        results
+        message: 'Invoice processing completed',
+        fulcrum: fulcrumResults ? {
+          processed: fulcrumResults.processedInvoices.length,
+          errors: fulcrumResults.errors.length,
+          success: fulcrumResults.success
+        } : { skipped: true },
+        qbo: {
+          processed: qboResults.processed,
+          sent: qboResults.sent,
+          skipped: qboResults.skipped,
+          errors: qboResults.errors
+        }
       })
     };
+    
   } catch (error) {
-    systemErrors.push(`Fatal error: ${error.message}`);
+    console.error('[Lambda] Fatal error:', error);
     
-    // Send error notification
-    await emailModule.sendSummaryEmail(
-      results || { processed: 0, sent: 0, skipped: 0, errors: 0, details: [] }
-    );
+    try {
+      await emailModule.sendSummaryEmail(
+        qboResults || { processed: 0, sent: 0, skipped: 0, errors: 0, details: [] },
+        fulcrumResults
+      );
+    } catch (emailError) {
+      console.error('[Email] Failed to send error notification:', emailError);
+    }
     
-    throw error; // Let Lambda handle the error
+    throw error;
   }
 };

@@ -1,157 +1,391 @@
+# RSG Invoice Processor - Complete Integration Guide
 
-# QBO Email & Send Flow
+## 📋 Overview
 
-Automates sending QuickBooks Online (QBO) invoices to customers. Pulls shipment and PO data from Fulcrum, updates the invoice in QBO, and emails it via AWS SES. Excludes Siemens and Honeywell customers by design.
+This system automates invoice processing in two stages:
+1. **Fulcrum Stage**: Browser automation to create and issue invoices
+2. **QBO Stage**: API integration to send invoices via email
 
-> **Region:** Deployed in **us-east-2**  
-> **Common command:** `npm run deploy-all`
+## 🚀 Quick Start
 
----
-
-## Features
-- OAuth2 token refresh for QBO (stores refresh token in SSM Parameter Store).
-- Fetches unsent & unpaid invoices, enriches with Fulcrum shipment data (tracking, ship date, ship method, PO).
-- Updates invoice fields (BillEmail, TrackingNum, ShipDate, CustomerMemo, PO custom field).
-- Sends invoice via QBO API and emails a summary via SES.
-- **Excludes** customers that include `siemens` or `honeywell` (case-insensitive) unless they’re explicitly whitelisted in `INCLUDED_CUSTOMERS`.
-
----
-
-## Project Structure (modules)
-- **config** – Environment credentials, business rules, region, QBO constants.
-- **oauth** – Refreshes QBO access token; persists refresh token in SSM (`/qbo-invoice-sender/{env}/refresh-token`).
-- **qboAPI** – Thin GET/POST client for QBO with minor versioning + helpful error logs.
-- **invoiceModule** – Queries invoices, updates fields, sends invoices.
-- **customerModule** – Loads customer display name & primary email; exclusion/inclusion logic.
-- **shippingModule** – Discovers `ShipMethodRef` by scanning recent transactions (read-only).
-- **externalDataModule** – Fulcrum v3 integration; finds matching invoice, selects the best shipment, extracts tracking/ship date/method/PO.
-- **invoiceProcessor** – Orchestrates per-invoice enrichment and sending.
-- **emailModule** – Sends a text summary email via SES (aggregates customers on errors; hides Siemens/Honeywell).
-- **app.run()** – Main program flow; returns a `results` summary.
-- **handler** – AWS Lambda entrypoint that wraps `app.run()` and always emails a summary.
-
----
-
-## Prerequisites
-- Node 18+
-- AWS account with:
-  - **SES** (in `us-east-2`) verified identities for `FROM_EMAIL` and recipients or domain.
-  - **SSM Parameter Store** permission to read/write the refresh token.
-- QBO app credentials (Client ID/Secret) and an initial **refresh token**.
-- Fulcrum API key with access to invoices/shipments.
-
----
-
-## Environment Variables
-Configure via your deployment system or a local `.env` (if you use one).
-
-- `AWS_REGION` (default: `us-east-2`)
-- `FROM_EMAIL` (default: `dreuven@rsgsecurity.com`)
-- `TO_EMAILS` (comma-separated; default: `ar@rsgsecurity.com`)
-
-> **Note:** The QBO refresh token is persisted to SSM:
-> `/qbo-invoice-sender/prod/refresh-token` or `/qbo-invoice-sender/sandbox/refresh-token`
-
----
-
-## Install
+### 1. Install Dependencies (5 min)
 ```bash
 npm install
 ```
 
----
-
-## Running Locally
-> Local runs will use whichever `activeConfig` you set (`config.production` or `config.sandbox`).
-
+### 2. Test Locally (5 min)
 ```bash
+# Test with visible browser
 node index.js
-# or
-node path/to/your/file.js
 ```
 
-### What happens
-1. OAuth token refresh (writes any new refresh token to SSM).
-2. Pulls recent invoices and filters to **unsent + unpaid**.
-3. Loads customers; excludes by business rules.
-4. Enriches each invoice from Fulcrum (tracking, ship date, ship method, PO).
-5. Updates the invoice in QBO and **sends** it via QBO API.
-6. Emails a summary via SES.
+The browser will open and you'll see Sheila Bot in action! 🤖
 
----
-
-## Deployment (AWS, us-east-2)
-This project is designed to run as an AWS Lambda.
-
-Typical workflow:
+### 3. Deploy to Lambda (10 min)
 ```bash
-npm run build
-npm run deploy-all    # commonly used
-```
-- Ensure your deployment targets **us-east-2** (SES & SSM are in that region).
-- After deploy, invoke on a schedule (e.g., EventBridge rule) or manually.
+# Make sure these environment variables are set
+export LAMBDA_FUNCTION_NAME="RSGInvoiceProcessor"
+export FROM_EMAIL="dreuven@rsgsecurity.com"
+export TO_EMAILS="ar@rsgsecurity.com"
+export AWS_REGION="us-east-2"
 
----
-
-## Business Rules
-- **Excluded customers:** names containing `siemens` or `honeywell` (case-insensitive).
-- **Included customers:** explicit safelist in `INCLUDED_CUSTOMERS` (must match a substring of the display name).
-- If excluded → invoice is **skipped**; reason is recorded in the summary.
-
----
-
-## Email Summary
-Subject example:
-```
-QBO Invoice Processing Summary on 2025-09-29 - 12 sent, 3 skipped, 2 errors
+# Build and deploy
+npm run package
+npm run deploy
+npm run update-config
 ```
 
-Includes sections:
-- Successfully Sent
-- Skipped (excluded)
-- Errors → shows **unique customer names only**, excludes Siemens/Honeywell.
-- System Errors (fatal/logical errors outside individual invoices).
+### 4. Test Lambda Invocation
+```bash
+npm run invoke
+```
 
----
+## 📁 File Structure
 
-## Fulcrum Matching Highlights
-- Finds the Fulcrum invoice by QBO links in `externalReferences` (id/number/doc).
-- Picks the **best shipment**:
-  - Prefers shipments explicitly linked to the Fulcrum invoice.
-  - Otherwise scores by line-item overlap + date proximity.
-  - Throws if multiple most-recent shipments share the same date (to avoid ambiguity).
-- Extracts: `trackingNumber`, `shippedDate`, `shippingMethod.name`, and `customerPONumber`.
+```
+.
+├── index.js              # Main integration file (Fulcrum + QBO)
+├── fulcrumProcessor.js   # Browser automation logic
+├── package.json          # Dependencies and scripts
+├── template.yaml         # AWS SAM template
+└── README.md            # This file
+```
 
----
+## 🔧 Configuration
 
-## Troubleshooting
-- **Refresh token isn’t updating:** confirm Lambda role has `ssm:PutParameter` for the configured path.
-- **SES sending fails:** verify domain/addresses in SES (in `us-east-2`), and check out of Sandbox if needed.
-- **No PO/Tracking detected:** the processor raises errors to surface missing data; those invoices will show in the summary.
-- **Ship method not found:** code logs a warning; `CustomerMemo` still notes the ship method text.
+### Environment Variables
 
----
+**For Local Testing:**
+```bash
+export FULCRUM_USERNAME="dreuven@rsgsecurity.com"
+export FULCRUM_PASSWORD="Levered76!"
+export FROM_EMAIL="dreuven@rsgsecurity.com"
+export TO_EMAILS="ar@rsgsecurity.com"
+export AWS_REGION="us-east-2"
+```
 
-## Safety Notes
-- Don’t commit live credentials or tokens. Prefer environment variables and SSM.
-- Ensure least-privilege IAM for SES/SSM access.
+**For Lambda:**
+Set these in AWS Lambda console or pass in the event payload:
+- `FROM_EMAIL`: Email sender address
+- `TO_EMAILS`: Comma-separated recipient emails
+- Fulcrum credentials passed in event payload (see below)
 
----
+### Lambda Event Payload
 
-## Scripts (examples)
-These depend on your project’s `package.json`:
 ```json
 {
-  "scripts": {
-    "build": "esbuild index.js --bundle --platform=node --outfile=dist/index.cjs",
-    "deploy-all": "your-deploy-script-here",
-    "start": "node index.js"
-  }
+  "fulcrumUsername": "dreuven@rsgsecurity.com",
+  "fulcrumPassword": "Levered76!"
 }
 ```
-> Replace `your-deploy-script-here` with your infra tool (SAM, CDK, Serverless, Terraform, etc.).
+
+## 📊 How It Works
+
+```
+Lambda Trigger
+    ↓
+┌─────────────────────────────────────┐
+│  STAGE 1: Fulcrum Processing       │
+├─────────────────────────────────────┤
+│  ✓ Launch Chromium browser          │
+│  ✓ Login to Fulcrum                 │
+│  ✓ Click "NEEDS ACTION" filter      │
+│  ✓ For each invoice row:            │
+│    • Extract SO balance & total     │
+│    • Check for REFUND badge         │
+│    • Validate business rules        │
+│    • Click Create→Issue OR Issue    │
+│  ✓ Paginate through all pages       │
+│  ✓ Collect results                  │
+└─────────────────────────────────────┘
+    ↓
+┌─────────────────────────────────────┐
+│  STAGE 2: QBO Processing           │
+├─────────────────────────────────────┤
+│  ✓ Refresh OAuth token              │
+│  ✓ Fetch unissued invoices          │
+│  ✓ Check shipping status (Fulcrum)  │
+│  ✓ Update PO numbers                │
+│  ✓ Send via QBO API                 │
+│  ✓ Track results                    │
+└─────────────────────────────────────┘
+    ↓
+┌─────────────────────────────────────┐
+│  Email Summary Report              │
+├─────────────────────────────────────┤
+│  • Fulcrum: X processed, Y errors   │
+│  • QBO: X sent, Y skipped, Z errors │
+│  • Detailed breakdown per invoice   │
+└─────────────────────────────────────┘
+```
+
+## 🎯 Business Logic
+
+### Fulcrum Processing Rules (`shouldProcessRow`)
+
+The processor will **skip** invoices that:
+- Have a REFUND badge
+- You can add custom rules in `fulcrumProcessor.js`:
+  ```javascript
+  function shouldProcessRow(balance, total, hasRefund) {
+    if (hasRefund) return false;
+    // Add your rules:
+    // if (Math.abs(balance - total) > 0.01) return false;
+    // if (total < 100) return false;
+    return true;
+  }
+  ```
+
+### QBO Processing Rules
+
+The processor will **skip** invoices for:
+- Excluded customers (Siemens, Honeywell)
+- Customers without email addresses
+- Orders not fully shipped
+
+## 📦 NPM Scripts
+
+```bash
+# Development
+npm run test-local          # Test locally with visible browser
+
+# Build & Package
+npm run clean              # Remove dist/ and function.zip
+npm run build              # Copy files to dist/
+npm run install-prod       # Install production dependencies
+npm run zip                # Create function.zip
+npm run package            # Run all above steps
+
+# Deployment
+npm run deploy             # Update Lambda function code
+npm run update-config      # Update memory/timeout/layer
+npm run deploy-all         # Package + deploy + configure
+npm run create-function    # Create new Lambda (first time only)
+
+# Testing & Monitoring
+npm run invoke             # Test Lambda with Fulcrum credentials
+npm run logs               # Follow Lambda logs in real-time
+```
+
+## 🔐 Security Notes
+
+**DO NOT** hardcode credentials in code or commit them to git!
+
+**Best practices:**
+1. **Local testing**: Use environment variables
+   ```bash
+   export FULCRUM_USERNAME="your-username"
+   export FULCRUM_PASSWORD="your-password"
+   ```
+
+2. **Lambda**: Pass credentials in event payload
+   ```json
+   {
+     "fulcrumUsername": "your-username",
+     "fulcrumPassword": "your-password"
+   }
+   ```
+
+3. **Production**: Use AWS Secrets Manager
+   ```javascript
+   // Example for future enhancement
+   const secret = await secretsManager.getSecretValue({
+     SecretId: 'fulcrum-credentials'
+   });
+   ```
+
+## 🐛 Troubleshooting
+
+### Local Testing Issues
+
+**Browser won't launch:**
+```bash
+# macOS
+which /Applications/Google\ Chrome.app/Contents/MacOS/Google\ Chrome
+
+# Linux
+which google-chrome
+```
+
+**"Module not found" errors:**
+```bash
+rm -rf node_modules package-lock.json
+npm install
+```
+
+### Lambda Issues
+
+**Function timeout:**
+- Increase timeout in `template.yaml` (currently 900s = 15 min)
+- Check CloudWatch logs: `npm run logs`
+
+**Memory issues:**
+- Memory is set to 3008 MB (required for Chromium)
+- Check actual usage in CloudWatch metrics
+
+**Chromium layer not found:**
+```bash
+# Update layer ARN in template.yaml
+# Check for latest at: https://github.com/shelfio/chrome-aws-lambda-layer
+```
+
+### Common Errors
+
+**"NEEDS ACTION button not found"**
+- The UI may have changed
+- Check the button selector in `fulcrumProcessor.js`
+- Try increasing wait times in config
+
+**"OAuth token refresh failed"**
+- Check if refresh token is still valid
+- Get new refresh token from QBO developer portal
+- Update config in `index.js`
+
+**"Invoice not fully shipped"**
+- This is expected behavior
+- Invoice will be sent once Fulcrum shows shipment complete
+
+## 📈 Monitoring
+
+### CloudWatch Logs
+```bash
+# Follow logs in real-time
+npm run logs
+
+# Or use AWS console
+# Navigate to: CloudWatch > Log Groups > /aws/lambda/RSGInvoiceProcessor
+```
+
+### Email Reports
+
+You'll receive an email summary after each run:
+```
+Invoice Processing Summary
+==========================
+Date: 2025-01-07T10:30:00Z
+Environment: PRODUCTION
+
+FULCRUM INVOICE PROCESSING
+==========================
+Total Processed: 15
+Errors: 0
+Status: ✓ SUCCESS
+
+Processed Invoices:
+- SO SO5197: Created & Issued (Balance: $249.97, Total: $249.97)
+- SO SO5198: Issued (Balance: $150.00, Total: $150.00)
+...
+
+QBO INVOICE SENDING
+===================
+Total processed: 45
+Successfully sent: 40
+Skipped (excluded): 3
+Errors: 2
+
+Successfully Sent:
+- Invoice 1001: sent to customer@example.com
+...
+```
+
+## 🔄 Scheduling
+
+To run automatically, uncomment the EventBridge schedule in `template.yaml`:
+
+```yaml
+InvoiceSchedule:
+  Type: AWS::Events::Rule
+  Properties:
+    Description: Daily invoice processing at 10 AM
+    ScheduleExpression: cron(0 10 * * ? *)  # 10 AM UTC daily
+    State: ENABLED
+    Targets:
+      - Arn: !GetAtt RSGInvoiceSender.Arn
+        Id: InvoiceProcessorTarget
+        Input: |
+          {
+            "fulcrumUsername": "dreuven@rsgsecurity.com",
+            "fulcrumPassword": "YOUR_PASSWORD_HERE"
+          }
+```
+
+Then redeploy:
+```bash
+sam deploy
+```
+
+## 🧪 Testing Strategy
+
+### 1. Test Fulcrum Only (Local)
+```javascript
+// In fulcrumProcessor.js, run standalone
+node fulcrumProcessor.js
+```
+
+### 2. Test QBO Only (Local)
+```javascript
+// Modify index.js temporarily to skip Fulcrum
+// Set fulcrumUsername = null
+node index.js
+```
+
+### 3. Test Full Integration (Local)
+```bash
+node index.js
+```
+
+### 4. Test in Lambda (Sandbox)
+```bash
+# Change activeConfig to config.sandbox in index.js
+npm run package
+npm run deploy
+npm run invoke
+```
+
+### 5. Production Deployment
+```bash
+# Ensure activeConfig = config.production
+npm run deploy-all
+```
+
+## 📞 Support
+
+If you encounter issues:
+1. Check CloudWatch logs first: `npm run logs`
+2. Review error messages in email reports
+3. Test locally with visible browser to debug
+4. Check Lambda memory/timeout metrics
+
+## 🎉 Success Metrics
+
+You'll know it's working when:
+- ✅ Invoices are created and issued in Fulcrum
+- ✅ Invoices are sent via QBO to customers
+- ✅ Email reports show successful processing
+- ✅ No errors in CloudWatch logs
+
+## 📝 Maintenance
+
+### Weekly Tasks
+- Review email reports for errors
+- Check CloudWatch metrics for performance
+
+### Monthly Tasks
+- Review excluded customer list
+- Update business rules if needed
+- Check for Chromium layer updates
+
+### As Needed
+- Refresh QBO OAuth tokens (automatic)
+- Update Fulcrum credentials if changed
+- Adjust timeouts if UI becomes slower
 
 ---
 
-## License
-Internal use at RSG.
+**Built with ❤️ by Doron Reuven @ RSG Security**
+
+**Powered by:**
+- 🤖 Puppeteer (Browser Automation)
+- 📧 QuickBooks Online API
+- ⚡ AWS Lambda + Chromium Layer
+- 📨 Amazon SES (Email Notifications)
