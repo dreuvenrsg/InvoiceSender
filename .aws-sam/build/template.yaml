@@ -1,0 +1,91 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Transform: AWS::Serverless-2016-10-31
+Description: "RSG Invoice Processor (SAM) \u2014 Node.js 20 + public Chromium layer"
+Globals:
+  Function:
+    Runtime: nodejs20.x
+    Architectures:
+    - x86_64
+    Timeout: 900
+    MemorySize: 3008
+    Environment:
+      Variables:
+        FROM_EMAIL:
+          Ref: FromEmail
+        TO_EMAILS:
+          Ref: ToEmails
+        deploy_region:
+          Ref: DeployRegion
+    EphemeralStorage:
+      Size: 2048
+Parameters:
+  FromEmail:
+    Type: String
+    Default: dreuven@rsgsecurity.com
+  ToEmails:
+    Type: String
+    Default: ar@rsgsecurity.com
+  DeployRegion:
+    Type: String
+    Default: us-east-2
+  ChromiumLayerArn:
+    Type: String
+    Default: arn:aws:lambda:us-east-2:764866452798:layer:chrome-aws-lambda:50
+    Description: Public Chrome AWS Lambda layer for us-east-2 (includes Chromium +
+      shared libs)
+Resources:
+  InvoiceProcessorFunction:
+    Type: AWS::Serverless::Function
+    Metadata:
+      BuildMethod: nodejs20.x
+      SamResourceId: InvoiceProcessorFunction
+    Properties:
+      FunctionName: RSGInvoiceProcessor
+      Description: Automated invoice processing - Fulcrum creation + QBO sending
+      CodeUri: InvoiceProcessorFunction
+      Handler: V2_emailSender.handler
+      Layers:
+      - Ref: ChromiumLayerArn
+      Policies:
+      - Version: '2012-10-17'
+        Statement:
+        - Effect: Allow
+          Action:
+          - ssm:GetParameter
+          - ssm:PutParameter
+          Resource:
+            Fn::Sub: arn:aws:ssm:${AWS::Region}:${AWS::AccountId}:parameter/qbo-invoice-sender/*
+        - Effect: Allow
+          Action: ses:SendEmail
+          Resource: '*'
+        - Effect: Allow
+          Action:
+          - logs:CreateLogGroup
+          - logs:CreateLogStream
+          - logs:PutLogEvents
+          Resource: '*'
+      Events:
+        Daily5pmPT:
+          Type: ScheduleV2
+          Properties:
+            Description: Run every day at 5:00 PM America/Los_Angeles
+            ScheduleExpression: cron(0 17 * * ? *)
+            ScheduleExpressionTimezone: America/Los_Angeles
+            State: ENABLED
+            FlexibleTimeWindow:
+              Mode: 'OFF'
+Outputs:
+  FunctionName:
+    Description: Deployed Lambda function name
+    Value:
+      Ref: InvoiceProcessorFunction
+  FunctionArn:
+    Description: Deployed Lambda function ARN
+    Value:
+      Fn::GetAtt:
+      - InvoiceProcessorFunction
+      - Arn
+  UsingChromiumLayer:
+    Description: Chromium layer ARN used by the function
+    Value:
+      Ref: ChromiumLayerArn
