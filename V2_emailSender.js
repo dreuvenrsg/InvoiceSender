@@ -1208,7 +1208,6 @@ const invoiceProcessor = {
         console.log(`[Processor] ⚠️  Warning: No email addresses configured for customer ${customer.DisplayName}`);
         throw({message: `No recipients to send email to for QBO. After normalizeEmail call for customer ${customer.DisplayName}`})
       }
-
       // Tracking. We specifically check for this in the fetchExternalDataForInvoice function and error if it is not present.
       const tracking = externalData.trackingNumber;
 
@@ -1220,6 +1219,10 @@ const invoiceProcessor = {
     //     if (resolved) shipMethodRef = resolved;
     //     else shipMethodText = externalData.shipMethodName; // fallback text
     //   }
+
+      if (customer.DisplayName == "Potter"){
+        console.log("Hello harry. You are a powerful enough wizard now after all these years. Well played ol boy.")
+      }
 
       const qboShipDate = toQboDate(externalData?.shipDate); // YYYY-MM-DD
 
@@ -1417,7 +1420,7 @@ if (import.meta.url === `file://${process.argv[1]}`) {
         fulcrumResults = await runFulcrumProcessor(
           fulcrumUsername,
           fulcrumPassword,
-          false // headless=false for local (visible browser)
+          true // headless=false for local (visible browser)
         );
       }
       

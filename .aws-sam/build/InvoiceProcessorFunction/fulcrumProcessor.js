@@ -21,14 +21,14 @@ const config = {
   loginUrl: 'https://rsgsecurity.fulcrumpro.com/ui/login',
   
   timeouts: {
-    navigation: 40000,
-    elementWait: 60000,
+    navigation: 35000,
+    elementWait: 65000,
     actionDelay: 6000,
     modalWait: 6000,
     pageStabilization: 6000
   }
 };
-
+config.timeouts.navigation
 // TTS for local development (Sheila Bot announcement)
 async function playWelcomeTTS() {
   if (!IS_LOCAL) return;
@@ -497,7 +497,7 @@ export async function runFulcrumProcessor(username, password, headless = true) {
     console.log('\n=== FULCRUM INVOICE PROCESSOR ===\n');
     
     // TTS welcome (local only)
-    // if (IS_LOCAL) await playWelcomeTTS();
+    if (IS_LOCAL) await playWelcomeTTS();
     
     // Initialize browser
     const browserData = await initBrowser(headless);
