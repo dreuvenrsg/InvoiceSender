@@ -72,7 +72,7 @@ const config = {
     , 'ACCESS HARDWARE', 'GENERAL MONITORS SYSTEMS', 'SYSTEM DISTRIBUTORS'
     , 'CB Doors and Hardware, Inc.', 'Kidde Edwards', 'CHUBB-EDWARDS CANADA'
     , 'SECURITY WHOLESALERS INC.', 'TOMAR ELECTRONICS, INC', 'AUTOMATIC BUILDING CONTROLS'
-    , 'KIDDE FENWAL INC'
+    , 'KIDDE FENWAL INC', 'APS Fire Co', 'SAFETY STORAGE INC.'
   ]
 };
 
@@ -1420,7 +1420,7 @@ if (import.meta.url === `file://${process.argv[1]}`) {
         fulcrumResults = await runFulcrumProcessor(
           fulcrumUsername,
           fulcrumPassword,
-          true // headless=false for local (visible browser)
+          false // headless=false for local (visible browser)
         );
       }
       
