@@ -375,77 +375,101 @@ async function processIssue(page, row, rowData, errors) {
   }
 }
 
-// Process all rows on current page
-async function processPage(page, processedInvoices, errors) {
+// Process all rows on current page using Set-based deduplication
+// Re-scans page after each process to handle dynamic reordering
+async function processPage(page, processedInvoices, errors, processedSOSet) {
   console.log('[Process] Processing current page...');
-  
-  try {
-    await page.waitForSelector('cdk-row', { visible: true, timeout: config.timeouts.elementWait });
-    
-    const rows = await page.$$('cdk-row');
-    console.log(`[Process] Found ${rows.length} rows`);
-    
-    if (rows.length === 0) return false;
-    
-    for (let i = 0; i < rows.length; i++) {
-      // Re-fetch rows each iteration (DOM may have changed)
-      const currentRows = await page.$$('cdk-row');
-      if (i >= currentRows.length) break;
-      
-      const row = currentRows[i];
-      const rowData = await extractRowData(row);
-      
-      if (!rowData) {
-        console.log(`[Process] Skipping row ${i + 1} - failed to extract data`);
-        continue;
-      }
-      
-      console.log(`[Process] Row ${i + 1}: ${rowData.soNumber}, $${rowData.balance} / $${rowData.total}, Refund=${rowData.hasRefund}`);
-      
-      // Check which button is present
-      const hasCreate = await row.evaluate(el => {
-        const buttons = Array.from(el.querySelectorAll('button'));
-        return buttons.some(btn => btn.textContent.trim() === 'Create' && btn.classList.contains('btn-primary'));
-      });
-      
-      const hasIssue = await row.evaluate(el => {
-        const buttons = Array.from(el.querySelectorAll('button'));
-        return buttons.some(btn => btn.textContent.trim() === 'Issue' && btn.classList.contains('btn-primary'));
-      });
 
-      // Check if we should process
-      if (!shouldProcessRow(rowData.balance, rowData.total, rowData.hasRefund, hasCreate, hasIssue)) {
-        console.log(`[Process] Skipping ${rowData.soNumber} - validation failed`);
-        continue;
-      }
-      
-      let success = false;
-      let action = '';
-      
-      if (hasCreate) {
-        success = await processCreate(page, row, rowData, errors);
-        action = 'Created & Issued';
-      } else if (hasIssue) {
-        success = await processIssue(page, row, rowData, errors);
-        action = 'Issued';
-      } else {
-        console.log(`[Process] No action button for ${rowData.soNumber}`);
-        continue;
-      }
-      
-      if (success) {
-        processedInvoices.push({
-          soNumber: rowData.soNumber,
-          balance: rowData.balance,
-          total: rowData.total,
-          action: action
+  try {
+    // Keep scanning current page until no unprocessed rows found
+    while (true) {
+      await page.waitForSelector('cdk-row', { visible: true, timeout: config.timeouts.elementWait });
+
+      const rows = await page.$$('cdk-row');
+      console.log(`[Process] Found ${rows.length} rows on page`);
+
+      if (rows.length === 0) return false;
+
+      let foundUnprocessedRow = false;
+
+      // Scan all rows looking for first unprocessed eligible row
+      for (let i = 0; i < rows.length; i++) {
+        const row = rows[i];
+        const rowData = await extractRowData(row);
+
+        if (!rowData) {
+          console.log(`[Process] Skipping row ${i + 1} - failed to extract data`);
+          continue;
+        }
+
+        // Skip if already processed
+        if (processedSOSet.has(rowData.soNumber)) {
+          console.log(`[Process] Row ${i + 1}: ${rowData.soNumber} - already processed, skipping`);
+          continue;
+        }
+
+        console.log(`[Process] Row ${i + 1}: ${rowData.soNumber}, $${rowData.balance} / $${rowData.total}, Refund=${rowData.hasRefund}`);
+
+        // Check which button is present
+        const hasCreate = await row.evaluate(el => {
+          const buttons = Array.from(el.querySelectorAll('button'));
+          return buttons.some(btn => btn.textContent.trim() === 'Create' && btn.classList.contains('btn-primary'));
         });
+
+        const hasIssue = await row.evaluate(el => {
+          const buttons = Array.from(el.querySelectorAll('button'));
+          return buttons.some(btn => btn.textContent.trim() === 'Issue' && btn.classList.contains('btn-primary'));
+        });
+
+        // Check if we should process
+        if (!shouldProcessRow(rowData.balance, rowData.total, rowData.hasRefund, hasCreate, hasIssue)) {
+          console.log(`[Process] Skipping ${rowData.soNumber} - validation failed`);
+          // Mark as processed so we don't check again
+          processedSOSet.add(rowData.soNumber);
+          continue;
+        }
+
+        let success = false;
+        let action = '';
+
+        if (hasCreate) {
+          success = await processCreate(page, row, rowData, errors);
+          action = 'Created & Issued';
+        } else if (hasIssue) {
+          success = await processIssue(page, row, rowData, errors);
+          action = 'Issued';
+        } else {
+          console.log(`[Process] No action button for ${rowData.soNumber}`);
+          processedSOSet.add(rowData.soNumber);
+          continue;
+        }
+
+        // Mark as processed regardless of success/failure
+        processedSOSet.add(rowData.soNumber);
+
+        if (success) {
+          processedInvoices.push({
+            soNumber: rowData.soNumber,
+            balance: rowData.balance,
+            total: rowData.total,
+            action: action
+          });
+        }
+
+        // Found and processed a row - mark flag and break to re-scan
+        foundUnprocessedRow = true;
+        await delay(1000);
+        break; // Exit for loop to re-fetch all rows (page reordered)
       }
-      
-      await delay(1000); // Small delay between rows
+
+      // If we scanned all rows and found nothing to process, page is exhausted
+      if (!foundUnprocessedRow) {
+        console.log('[Process] No unprocessed rows found on this page');
+        return true; // Page processed successfully
+      }
+
+      // Otherwise, loop continues and re-scans page
     }
-    
-    return true;
   } catch (error) {
     console.error('[Process] Error:', error.message);
     errors.push(`Page processing error: ${error.message}`);
@@ -477,6 +501,7 @@ async function checkNextPage(page) {
 export async function runFulcrumProcessor(username, password, headless = true) {
   const processedInvoices = [];
   const errors = [];
+  const processedSOSet = new Set(); // Track processed SO numbers to prevent duplicates
   let browser = null;
   
   try {
@@ -506,14 +531,14 @@ export async function runFulcrumProcessor(username, password, headless = true) {
     while (hasMorePages && pageCount < 20) { // RESET to 20 later Safety limit
       pageCount++;
       console.log(`\n[Main] Processing page ${pageCount}...\n`);
-      
-      const pageProcessed = await processPage(page, processedInvoices, errors);
-      
+
+      const pageProcessed = await processPage(page, processedInvoices, errors, processedSOSet);
+
       if (!pageProcessed) {
         console.log('[Main] No rows processed, stopping');
         break;
       }
-      
+
       hasMorePages = await checkNextPage(page);
     }
     
