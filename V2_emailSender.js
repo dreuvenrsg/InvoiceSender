@@ -72,7 +72,8 @@ const config = {
     , 'ACCESS HARDWARE', 'GENERAL MONITORS SYSTEMS', 'SYSTEM DISTRIBUTORS'
     , 'CB Doors and Hardware, Inc.', 'Kidde Edwards', 'CHUBB-EDWARDS CANADA'
     , 'SECURITY WHOLESALERS INC.', 'TOMAR ELECTRONICS, INC', 'AUTOMATIC BUILDING CONTROLS'
-    , 'KIDDE FENWAL INC', 'APS Fire Co', 'SAFETY STORAGE INC.'
+    , 'KIDDE FENWAL INC', 'APS Fire Co', 'SAFETY STORAGE INC.', 'JM ELECTRONIC ENGINEERING INC.'
+    , 'JIMS MACHINE', 'SIGNAL SOURCE'
   ]
 };
 
@@ -1171,7 +1172,9 @@ const invoiceProcessor = {
   async processInvoice(invoice, customersMap) {
     await sleep(50); // small pacing
     // console.log(`\n[Processor] === Processing Invoice ID: ${invoice.Id} ===`);
-
+    if (invoice.DocNumber == 'F7045'){
+      console.log('Issue over here. Break break dance dance.');
+    }
     try {
       // Get full invoice details
       const fullInvoice = await invoiceModule.getFullInvoice(invoice.Id);

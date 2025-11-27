@@ -22,7 +22,7 @@ const config = {
   
   timeouts: {
     navigation: 35000,
-    elementWait: 65000,
+    elementWait: 30000,
     actionDelay: 6000,
     modalWait: 6000,
     pageStabilization: 6000
@@ -33,7 +33,7 @@ config.timeouts.navigation
 async function playWelcomeTTS() {
   if (!IS_LOCAL) return;
   try {
-    const message = "Hello, I am the Sheila Bot Invoice Processor 3000. Beginning program execution. I only take orders from my overlord Doron Reuven.";
+    const message = "Hello, I am the Sheila Bot Invoice Processor 3000. Beginning program execution.";
     const command = process.platform === 'darwin' ? `say "${message}"` : `echo "${message}"`;
     await execAsync(command);
   } catch (error) {
@@ -249,61 +249,47 @@ async function processCreate(page, row, rowData, errors) {
     if (!issuedClicked) throw new Error('Issued button not found in dropdown');
     
     // Wait for modal
-    await page.waitForSelector('.modal-footer', { visible: true, timeout: config.timeouts.elementWait });
+    await page.waitForSelector('.card-footer', { visible: true, timeout: config.timeouts.elementWait });
     
-    // Click "Yes" in modal
+    // Click "Ok" in modal
     console.log('[Row] Confirming...');
-    const yesClicked = await page.evaluate(() => {
-      const modal = document.querySelector('.modal-footer');
+    const okClicked = await page.evaluate(() => {
+      const modal = document.querySelector('.card-footer');
       if (modal) {
         const buttons = Array.from(modal.querySelectorAll('button'));
-        const yesBtn = buttons.find(btn => btn.textContent.trim() === 'Yes' && btn.classList.contains('btn-primary'));
-        if (yesBtn) {
-          yesBtn.click();
+        const okBtn = buttons.find(btn => btn.textContent.trim().toLowerCase() === 'ok' && btn.classList.contains('btn-primary'));
+        if (okBtn) {
+          okBtn.click();
           return true;
         }
       }
       return false;
     });
     
-    if (!yesClicked) throw new Error('Yes button not found');
+    if (!okClicked) throw new Error('Ok button not found');
     
     // Wait for modal to close
     await delay(config.timeouts.modalWait);
-    
-    // Click Cancel to return to list
-    console.log('[Row] Clicking Cancel to return...');
-    const cancelClicked = await page.evaluate(() => {
-      const buttons = Array.from(document.querySelectorAll('button'));
-      const cancelBtn = buttons.find(btn => btn.textContent.trim() === 'Cancel' && !btn.closest('.modal'));
-      if (cancelBtn) {
-        cancelBtn.click();
-        return true;
-      }
-      return false;
-    });
-    
-    if (!cancelClicked) throw new Error('Cancel button not found');
-    await delay(1000);
-    
     console.log(`[Row] ✓ ${rowData.soNumber} created & issued`);
+    
+    await goToInvoicing(page);
     
     // Re-click NEEDS ACTION
     await clickNeedsAction(page);
     
     return true;
   } catch (error) {
-    const errorMsg = `Failed CREATE for ${rowData.soNumber}: ${error.message}`;
-    console.error(`[Row] ${errorMsg}`);
-    errors.push(errorMsg);
-    
-    // Try to recover
-    try {
-      await goToInvoicing(page);
-      await clickNeedsAction(page);
-    } catch (recoveryError) {
-      console.error('[Row] Recovery failed:', recoveryError.message);
-    }
+      const errorMsg = `Failed CREATE for ${rowData.soNumber}: ${error.message}`;
+      console.error(`[Row] ${errorMsg}`);
+      errors.push(errorMsg);
+      
+      // Try to recover
+      try {
+        await goToInvoicing(page);
+        await clickNeedsAction(page);
+      } catch (recoveryError) {
+        console.error('[Row] Recovery failed:', recoveryError.message);
+      }
     
     return false;
   }
