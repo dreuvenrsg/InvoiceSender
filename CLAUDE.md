@@ -143,15 +143,22 @@ timeouts: {
 ## OAuth Token Management
 
 OAuth tokens are stored in AWS SSM Parameter Store at:
-- `/qbo-invoice-sender/refresh_token`
+- Production: `/qbo-invoice-sender/prod/refresh-token`
+- Sandbox: `/qbo-invoice-sender/sandbox/refresh-token`
 
 The system automatically:
-1. Loads refresh token from SSM
+1. Loads refresh token from SSM (falls back to hardcoded config if not found)
 2. Exchanges it for a new access token
 3. Saves the new refresh token back to SSM
 
-If OAuth fails, get a new refresh token from:
-https://appcenter.intuit.com/connect/oauth2?client_id=...&response_type=code&scope=com.intuit.quickbooks.accounting&redirect_uri=https://developer.intuit.com/v2/OAuth2Playground/RedirectUrl&state=xyz123
+**Important**: The refresh token in `V2_emailSender.js` (`config.production.REFRESH_TOKEN`) should be kept in sync with SSM. When OAuth fails:
+1. Check SSM Parameter Store first: `aws ssm get-parameter --name "/qbo-invoice-sender/prod/refresh-token" --with-decryption --region us-east-2`
+2. If needed, get a new refresh token from QuickBooks OAuth playground:
+   ```
+   https://appcenter.intuit.com/connect/oauth2?client_id=ABFEj4xs3FW9f1oCAEXrH0Ww04eFdJAbQSQwbq03imSVrkXLY4&response_type=code&scope=com.intuit.quickbooks.accounting&redirect_uri=https://developer.intuit.com/v2/OAuth2Playground/RedirectUrl&state=xyz123
+   ```
+3. Update both SSM and the code config
+4. Redeploy if code was changed
 
 ## Important Files Not to Modify
 
@@ -189,6 +196,10 @@ https://appcenter.intuit.com/connect/oauth2?client_id=...&response_type=code&sco
 - Errors in one stage don't prevent the other from running
 - All errors are reported in the email summary
 - Lambda returns success (200) even if some invoices fail
+- **System Error Notifications**: If the entire system crashes (unexpected errors), an error email is automatically sent with:
+  - Full error message and stack trace
+  - Processing results up to the point of failure
+  - Both Fulcrum and QBO stage results (if available)
 
 ## Troubleshooting
 
@@ -202,9 +213,27 @@ https://appcenter.intuit.com/connect/oauth2?client_id=...&response_type=code&sco
 - Increase wait timeouts
 
 ### OAuth Token Refresh Failed
-- Get new refresh token from QuickBooks OAuth playground
-- Update config in V2_emailSender.js
-- Manually save to SSM Parameter Store if needed
+Error: `"invalid_grant"` or `"Incorrect or invalid refresh token"`
+
+**Solution**:
+1. Check AWS SSM for current token:
+   ```bash
+   aws ssm get-parameter --name "/qbo-invoice-sender/prod/refresh-token" --with-decryption --region us-east-2
+   ```
+2. If SSM token is outdated, get new one from QuickBooks OAuth playground (see OAuth Token Management section)
+3. Update `V2_emailSender.js` line 46: `REFRESH_TOKEN: "RT1-..."`
+4. Update SSM Parameter Store:
+   ```bash
+   aws ssm put-parameter --name "/qbo-invoice-sender/prod/refresh-token" --value "RT1-..." --type SecureString --overwrite --region us-east-2
+   ```
+5. Redeploy: `sam build && sam deploy`
+
+### Fulcrum Pagination Issues
+If Fulcrum processor keeps looping through pages or doesn't stop:
+- Check that "NEEDS ACTION" filter is active after page changes
+- Pagination logic checks: current page number vs total pages, next button disabled state
+- System has 20-page safety limit to prevent infinite loops
+- Review `fulcrumProcessor.js` `checkNextPage()` function (lines 501-564)
 
 ### Function Timeout
 - Normal for large batches (100+ invoices)
@@ -218,3 +247,34 @@ https://appcenter.intuit.com/connect/oauth2?client_id=...&response_type=code&sco
 3. **Lambda Test**: Use `npm run invoke-local` for SAM local testing
 4. **Monitor Logs**: Keep `npm run logs` running during execution
 5. **Check Email**: Verify email summary report after each run
+
+## Recent Updates (December 2025)
+
+### Fixed OAuth Token Authentication
+- **Issue**: Production refresh token expired, causing `invalid_grant` errors
+- **Solution**: Updated token from AWS SSM Parameter Store
+- **Files Changed**: `V2_emailSender.js` (line 46)
+- **Current Token**: `RT1-130-H0-1774055940wv9v4sjzw6d75pvomba6`
+
+### Added System Error Email Notifications
+- **Feature**: Automatic error emails when system crashes unexpectedly
+- **Benefit**: Team is immediately notified of critical failures
+- **Implementation**:
+  - Local execution: `V2_emailSender.js` lines 1439-1455
+  - Lambda handler: `V2_emailSender.js` lines 1645-1671
+- **Email Contains**: Full error message, stack trace, and processing results
+
+### Improved Fulcrum Pagination
+- **Issue**: Pagination was looping infinitely on some pages
+- **Solution**: Enhanced pagination detection logic
+- **Changes**:
+  - Check current page number vs total pages
+  - Multiple methods to verify next button disabled state
+  - More robust button state detection
+- **Files Changed**: `fulcrumProcessor.js` lines 501-564
+
+### Deployment
+- Last deployed: December 11, 2025
+- Git commit: `48875c2`
+- AWS Region: us-west-1
+- Lambda Function: `RSGInvoiceProcessor`
