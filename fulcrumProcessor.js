@@ -142,9 +142,9 @@ async function goToInvoicing(page) {
 // Click the "NEEDS ACTION" button at the top
 async function clickNeedsAction(page) {
   console.log('[Nav] Clicking NEEDS ACTION...');
-  
+
   await page.waitForSelector('button', { visible: true, timeout: config.timeouts.elementWait });
-  
+
   const clicked = await page.evaluate(() => {
     const buttons = Array.from(document.querySelectorAll('button'));
     const needsActionBtn = buttons.find(btn => btn.textContent.includes('NEEDS ACTION'));
@@ -154,11 +154,32 @@ async function clickNeedsAction(page) {
     }
     return false;
   });
-  
+
   if (!clicked) throw new Error('NEEDS ACTION button not found');
-  
+
   await delay(config.timeouts.pageStabilization);
   console.log('[Nav] NEEDS ACTION clicked');
+}
+
+// Verify NEEDS ACTION filter is active
+async function verifyNeedsActionActive(page) {
+  const isActive = await page.evaluate(() => {
+    const buttons = Array.from(document.querySelectorAll('button'));
+    const needsActionBtn = buttons.find(btn => btn.textContent.includes('NEEDS ACTION'));
+    // Check if button has active/selected class (common patterns: active, selected, btn-primary, etc.)
+    return needsActionBtn && (
+      needsActionBtn.classList.contains('active') ||
+      needsActionBtn.classList.contains('btn-primary') ||
+      needsActionBtn.classList.contains('selected') ||
+      needsActionBtn.getAttribute('aria-pressed') === 'true'
+    );
+  });
+
+  if (!isActive) {
+    console.log('[Nav] WARNING: NEEDS ACTION filter may not be active!');
+  }
+
+  return isActive;
 }
 
 // Extract data from a row
@@ -480,17 +501,62 @@ async function processPage(page, processedInvoices, errors, processedSOSet) {
 // Check for and click next page
 async function checkNextPage(page) {
   try {
-    const nextPageButtons = await page.$$('.p-paginator-page:not(.p-paginator-page-selected)');
-    
-    if (nextPageButtons.length > 0) {
-      console.log('[Pagination] Clicking next page...');
-      await nextPageButtons[0].click();
-      await delay(config.timeouts.pageStabilization);
-      return true;
+    // Get all page buttons
+    const pageInfo = await page.evaluate(() => {
+      const allPages = Array.from(document.querySelectorAll('.p-paginator-page'));
+      const currentPage = document.querySelector('.p-paginator-page.p-paginator-page-selected');
+      const nextButton = document.querySelector('.p-paginator-next');
+      const isNextDisabled = nextButton && (
+        nextButton.classList.contains('p-paginator-element-disabled') ||
+        nextButton.disabled ||
+        nextButton.getAttribute('aria-disabled') === 'true'
+      );
+
+      return {
+        totalPages: allPages.length,
+        currentPageNum: currentPage ? parseInt(currentPage.textContent.trim()) : 1,
+        hasNextButton: !!nextButton,
+        isNextDisabled: isNextDisabled
+      };
+    });
+
+    console.log(`[Pagination] Current page: ${pageInfo.currentPageNum}/${pageInfo.totalPages}`);
+
+    // If we're on the last page number, we're done
+    if (pageInfo.currentPageNum >= pageInfo.totalPages && pageInfo.totalPages > 0) {
+      console.log('[Pagination] Reached last page (current page equals total pages)');
+      return false;
     }
-    
-    console.log('[Pagination] No more pages');
-    return false;
+
+    // If next button is disabled, we're on the last page
+    if (pageInfo.isNextDisabled) {
+      console.log('[Pagination] Reached last page (next button disabled)');
+      return false;
+    }
+
+    if (!pageInfo.hasNextButton) {
+      console.log('[Pagination] No next button found');
+      return false;
+    }
+
+    // Click the next button
+    const clicked = await page.evaluate(() => {
+      const nextButton = document.querySelector('.p-paginator-next');
+      if (nextButton && !nextButton.classList.contains('p-paginator-element-disabled')) {
+        nextButton.click();
+        return true;
+      }
+      return false;
+    });
+
+    if (!clicked) {
+      console.log('[Pagination] Could not click next button');
+      return false;
+    }
+
+    console.log('[Pagination] Clicked next page button');
+    await delay(config.timeouts.pageStabilization);
+    return true;
   } catch (error) {
     console.log('[Pagination] Error:', error.message);
     return false;
@@ -527,19 +593,23 @@ export async function runFulcrumProcessor(username, password, headless = true) {
     // Process all pages
     let pageCount = 0;
     let hasMorePages = true;
-    
-    while (hasMorePages && pageCount < 20) { // RESET to 20 later Safety limit
+
+    while (hasMorePages && pageCount < 20) { // Safety limit
       pageCount++;
       console.log(`\n[Main] Processing page ${pageCount}...\n`);
 
       const pageProcessed = await processPage(page, processedInvoices, errors, processedSOSet);
 
       if (!pageProcessed) {
-        console.log('[Main] No rows processed, stopping');
+        console.log('[Main] Page processing failed, stopping');
         break;
       }
 
       hasMorePages = await checkNextPage(page);
+    }
+
+    if (pageCount >= 20) {
+      console.log('[Main] WARNING: Hit page limit safety check (20 pages)');
     }
     
     console.log('\n=== FULCRUM COMPLETE ===');
