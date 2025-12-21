@@ -6,8 +6,8 @@ resolve_s3 = true
 s3_prefix = "rsg-invoice-processor"
 confirm_changeset = true
 capabilities = "CAPABILITY_IAM"
-parameter_overrides = "FromEmail=\"dreuven@rsgsecurity.com\" ToEmails=\"ar@rsgsecurity.com\" DeployRegion=\"us-east-2\""
+parameter_overrides = "FromEmail=\"dreuven@rsgsecurity.com\" ToEmails=\"ar@rsgsecurity.com\" DeployRegion=\"us-west-1\""
 image_repositories = []
 
 [default.global.parameters]
-region = "us-east-2"
+region = "us-west-1"

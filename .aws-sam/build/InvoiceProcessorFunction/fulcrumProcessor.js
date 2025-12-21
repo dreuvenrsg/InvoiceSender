@@ -22,7 +22,7 @@ const config = {
   
   timeouts: {
     navigation: 35000,
-    elementWait: 65000,
+    elementWait: 30000,
     actionDelay: 6000,
     modalWait: 6000,
     pageStabilization: 6000
@@ -33,7 +33,7 @@ config.timeouts.navigation
 async function playWelcomeTTS() {
   if (!IS_LOCAL) return;
   try {
-    const message = "Hello, I am the Sheila Bot Invoice Processor 3000. Beginning program execution. I only take orders from my overlord Doron Reuven.";
+    const message = "Hello, I am the Sheila Bot Invoice Processor 3000. Beginning program execution.";
     const command = process.platform === 'darwin' ? `say "${message}"` : `echo "${message}"`;
     await execAsync(command);
   } catch (error) {
@@ -142,9 +142,9 @@ async function goToInvoicing(page) {
 // Click the "NEEDS ACTION" button at the top
 async function clickNeedsAction(page) {
   console.log('[Nav] Clicking NEEDS ACTION...');
-  
+
   await page.waitForSelector('button', { visible: true, timeout: config.timeouts.elementWait });
-  
+
   const clicked = await page.evaluate(() => {
     const buttons = Array.from(document.querySelectorAll('button'));
     const needsActionBtn = buttons.find(btn => btn.textContent.includes('NEEDS ACTION'));
@@ -154,11 +154,32 @@ async function clickNeedsAction(page) {
     }
     return false;
   });
-  
+
   if (!clicked) throw new Error('NEEDS ACTION button not found');
-  
+
   await delay(config.timeouts.pageStabilization);
   console.log('[Nav] NEEDS ACTION clicked');
+}
+
+// Verify NEEDS ACTION filter is active
+async function verifyNeedsActionActive(page) {
+  const isActive = await page.evaluate(() => {
+    const buttons = Array.from(document.querySelectorAll('button'));
+    const needsActionBtn = buttons.find(btn => btn.textContent.includes('NEEDS ACTION'));
+    // Check if button has active/selected class (common patterns: active, selected, btn-primary, etc.)
+    return needsActionBtn && (
+      needsActionBtn.classList.contains('active') ||
+      needsActionBtn.classList.contains('btn-primary') ||
+      needsActionBtn.classList.contains('selected') ||
+      needsActionBtn.getAttribute('aria-pressed') === 'true'
+    );
+  });
+
+  if (!isActive) {
+    console.log('[Nav] WARNING: NEEDS ACTION filter may not be active!');
+  }
+
+  return isActive;
 }
 
 // Extract data from a row
@@ -249,61 +270,47 @@ async function processCreate(page, row, rowData, errors) {
     if (!issuedClicked) throw new Error('Issued button not found in dropdown');
     
     // Wait for modal
-    await page.waitForSelector('.modal-footer', { visible: true, timeout: config.timeouts.elementWait });
+    await page.waitForSelector('.card-footer', { visible: true, timeout: config.timeouts.elementWait });
     
-    // Click "Yes" in modal
+    // Click "Ok" in modal
     console.log('[Row] Confirming...');
-    const yesClicked = await page.evaluate(() => {
-      const modal = document.querySelector('.modal-footer');
+    const okClicked = await page.evaluate(() => {
+      const modal = document.querySelector('.card-footer');
       if (modal) {
         const buttons = Array.from(modal.querySelectorAll('button'));
-        const yesBtn = buttons.find(btn => btn.textContent.trim() === 'Yes' && btn.classList.contains('btn-primary'));
-        if (yesBtn) {
-          yesBtn.click();
+        const okBtn = buttons.find(btn => btn.textContent.trim().toLowerCase() === 'ok' && btn.classList.contains('btn-primary'));
+        if (okBtn) {
+          okBtn.click();
           return true;
         }
       }
       return false;
     });
     
-    if (!yesClicked) throw new Error('Yes button not found');
+    if (!okClicked) throw new Error('Ok button not found');
     
     // Wait for modal to close
     await delay(config.timeouts.modalWait);
-    
-    // Click Cancel to return to list
-    console.log('[Row] Clicking Cancel to return...');
-    const cancelClicked = await page.evaluate(() => {
-      const buttons = Array.from(document.querySelectorAll('button'));
-      const cancelBtn = buttons.find(btn => btn.textContent.trim() === 'Cancel' && !btn.closest('.modal'));
-      if (cancelBtn) {
-        cancelBtn.click();
-        return true;
-      }
-      return false;
-    });
-    
-    if (!cancelClicked) throw new Error('Cancel button not found');
-    await delay(1000);
-    
     console.log(`[Row] ✓ ${rowData.soNumber} created & issued`);
+    
+    await goToInvoicing(page);
     
     // Re-click NEEDS ACTION
     await clickNeedsAction(page);
     
     return true;
   } catch (error) {
-    const errorMsg = `Failed CREATE for ${rowData.soNumber}: ${error.message}`;
-    console.error(`[Row] ${errorMsg}`);
-    errors.push(errorMsg);
-    
-    // Try to recover
-    try {
-      await goToInvoicing(page);
-      await clickNeedsAction(page);
-    } catch (recoveryError) {
-      console.error('[Row] Recovery failed:', recoveryError.message);
-    }
+      const errorMsg = `Failed CREATE for ${rowData.soNumber}: ${error.message}`;
+      console.error(`[Row] ${errorMsg}`);
+      errors.push(errorMsg);
+      
+      // Try to recover
+      try {
+        await goToInvoicing(page);
+        await clickNeedsAction(page);
+      } catch (recoveryError) {
+        console.error('[Row] Recovery failed:', recoveryError.message);
+      }
     
     return false;
   }
@@ -389,77 +396,101 @@ async function processIssue(page, row, rowData, errors) {
   }
 }
 
-// Process all rows on current page
-async function processPage(page, processedInvoices, errors) {
+// Process all rows on current page using Set-based deduplication
+// Re-scans page after each process to handle dynamic reordering
+async function processPage(page, processedInvoices, errors, processedSOSet) {
   console.log('[Process] Processing current page...');
-  
-  try {
-    await page.waitForSelector('cdk-row', { visible: true, timeout: config.timeouts.elementWait });
-    
-    const rows = await page.$$('cdk-row');
-    console.log(`[Process] Found ${rows.length} rows`);
-    
-    if (rows.length === 0) return false;
-    
-    for (let i = 0; i < rows.length; i++) {
-      // Re-fetch rows each iteration (DOM may have changed)
-      const currentRows = await page.$$('cdk-row');
-      if (i >= currentRows.length) break;
-      
-      const row = currentRows[i];
-      const rowData = await extractRowData(row);
-      
-      if (!rowData) {
-        console.log(`[Process] Skipping row ${i + 1} - failed to extract data`);
-        continue;
-      }
-      
-      console.log(`[Process] Row ${i + 1}: ${rowData.soNumber}, $${rowData.balance} / $${rowData.total}, Refund=${rowData.hasRefund}`);
-      
-      // Check which button is present
-      const hasCreate = await row.evaluate(el => {
-        const buttons = Array.from(el.querySelectorAll('button'));
-        return buttons.some(btn => btn.textContent.trim() === 'Create' && btn.classList.contains('btn-primary'));
-      });
-      
-      const hasIssue = await row.evaluate(el => {
-        const buttons = Array.from(el.querySelectorAll('button'));
-        return buttons.some(btn => btn.textContent.trim() === 'Issue' && btn.classList.contains('btn-primary'));
-      });
 
-      // Check if we should process
-      if (!shouldProcessRow(rowData.balance, rowData.total, rowData.hasRefund, hasCreate, hasIssue)) {
-        console.log(`[Process] Skipping ${rowData.soNumber} - validation failed`);
-        continue;
-      }
-      
-      let success = false;
-      let action = '';
-      
-      if (hasCreate) {
-        success = await processCreate(page, row, rowData, errors);
-        action = 'Created & Issued';
-      } else if (hasIssue) {
-        success = await processIssue(page, row, rowData, errors);
-        action = 'Issued';
-      } else {
-        console.log(`[Process] No action button for ${rowData.soNumber}`);
-        continue;
-      }
-      
-      if (success) {
-        processedInvoices.push({
-          soNumber: rowData.soNumber,
-          balance: rowData.balance,
-          total: rowData.total,
-          action: action
+  try {
+    // Keep scanning current page until no unprocessed rows found
+    while (true) {
+      await page.waitForSelector('cdk-row', { visible: true, timeout: config.timeouts.elementWait });
+
+      const rows = await page.$$('cdk-row');
+      console.log(`[Process] Found ${rows.length} rows on page`);
+
+      if (rows.length === 0) return false;
+
+      let foundUnprocessedRow = false;
+
+      // Scan all rows looking for first unprocessed eligible row
+      for (let i = 0; i < rows.length; i++) {
+        const row = rows[i];
+        const rowData = await extractRowData(row);
+
+        if (!rowData) {
+          console.log(`[Process] Skipping row ${i + 1} - failed to extract data`);
+          continue;
+        }
+
+        // Skip if already processed
+        if (processedSOSet.has(rowData.soNumber)) {
+          console.log(`[Process] Row ${i + 1}: ${rowData.soNumber} - already processed, skipping`);
+          continue;
+        }
+
+        console.log(`[Process] Row ${i + 1}: ${rowData.soNumber}, $${rowData.balance} / $${rowData.total}, Refund=${rowData.hasRefund}`);
+
+        // Check which button is present
+        const hasCreate = await row.evaluate(el => {
+          const buttons = Array.from(el.querySelectorAll('button'));
+          return buttons.some(btn => btn.textContent.trim() === 'Create' && btn.classList.contains('btn-primary'));
         });
+
+        const hasIssue = await row.evaluate(el => {
+          const buttons = Array.from(el.querySelectorAll('button'));
+          return buttons.some(btn => btn.textContent.trim() === 'Issue' && btn.classList.contains('btn-primary'));
+        });
+
+        // Check if we should process
+        if (!shouldProcessRow(rowData.balance, rowData.total, rowData.hasRefund, hasCreate, hasIssue)) {
+          console.log(`[Process] Skipping ${rowData.soNumber} - validation failed`);
+          // Mark as processed so we don't check again
+          processedSOSet.add(rowData.soNumber);
+          continue;
+        }
+
+        let success = false;
+        let action = '';
+
+        if (hasCreate) {
+          success = await processCreate(page, row, rowData, errors);
+          action = 'Created & Issued';
+        } else if (hasIssue) {
+          success = await processIssue(page, row, rowData, errors);
+          action = 'Issued';
+        } else {
+          console.log(`[Process] No action button for ${rowData.soNumber}`);
+          processedSOSet.add(rowData.soNumber);
+          continue;
+        }
+
+        // Mark as processed regardless of success/failure
+        processedSOSet.add(rowData.soNumber);
+
+        if (success) {
+          processedInvoices.push({
+            soNumber: rowData.soNumber,
+            balance: rowData.balance,
+            total: rowData.total,
+            action: action
+          });
+        }
+
+        // Found and processed a row - mark flag and break to re-scan
+        foundUnprocessedRow = true;
+        await delay(1000);
+        break; // Exit for loop to re-fetch all rows (page reordered)
       }
-      
-      await delay(1000); // Small delay between rows
+
+      // If we scanned all rows and found nothing to process, page is exhausted
+      if (!foundUnprocessedRow) {
+        console.log('[Process] No unprocessed rows found on this page');
+        return true; // Page processed successfully
+      }
+
+      // Otherwise, loop continues and re-scans page
     }
-    
-    return true;
   } catch (error) {
     console.error('[Process] Error:', error.message);
     errors.push(`Page processing error: ${error.message}`);
@@ -470,17 +501,62 @@ async function processPage(page, processedInvoices, errors) {
 // Check for and click next page
 async function checkNextPage(page) {
   try {
-    const nextPageButtons = await page.$$('.p-paginator-page:not(.p-paginator-page-selected)');
-    
-    if (nextPageButtons.length > 0) {
-      console.log('[Pagination] Clicking next page...');
-      await nextPageButtons[0].click();
-      await delay(config.timeouts.pageStabilization);
-      return true;
+    // Get all page buttons
+    const pageInfo = await page.evaluate(() => {
+      const allPages = Array.from(document.querySelectorAll('.p-paginator-page'));
+      const currentPage = document.querySelector('.p-paginator-page.p-paginator-page-selected');
+      const nextButton = document.querySelector('.p-paginator-next');
+      const isNextDisabled = nextButton && (
+        nextButton.classList.contains('p-paginator-element-disabled') ||
+        nextButton.disabled ||
+        nextButton.getAttribute('aria-disabled') === 'true'
+      );
+
+      return {
+        totalPages: allPages.length,
+        currentPageNum: currentPage ? parseInt(currentPage.textContent.trim()) : 1,
+        hasNextButton: !!nextButton,
+        isNextDisabled: isNextDisabled
+      };
+    });
+
+    console.log(`[Pagination] Current page: ${pageInfo.currentPageNum}/${pageInfo.totalPages}`);
+
+    // If we're on the last page number, we're done
+    if (pageInfo.currentPageNum >= pageInfo.totalPages && pageInfo.totalPages > 0) {
+      console.log('[Pagination] Reached last page (current page equals total pages)');
+      return false;
     }
-    
-    console.log('[Pagination] No more pages');
-    return false;
+
+    // If next button is disabled, we're on the last page
+    if (pageInfo.isNextDisabled) {
+      console.log('[Pagination] Reached last page (next button disabled)');
+      return false;
+    }
+
+    if (!pageInfo.hasNextButton) {
+      console.log('[Pagination] No next button found');
+      return false;
+    }
+
+    // Click the next button
+    const clicked = await page.evaluate(() => {
+      const nextButton = document.querySelector('.p-paginator-next');
+      if (nextButton && !nextButton.classList.contains('p-paginator-element-disabled')) {
+        nextButton.click();
+        return true;
+      }
+      return false;
+    });
+
+    if (!clicked) {
+      console.log('[Pagination] Could not click next button');
+      return false;
+    }
+
+    console.log('[Pagination] Clicked next page button');
+    await delay(config.timeouts.pageStabilization);
+    return true;
   } catch (error) {
     console.log('[Pagination] Error:', error.message);
     return false;
@@ -491,6 +567,7 @@ async function checkNextPage(page) {
 export async function runFulcrumProcessor(username, password, headless = true) {
   const processedInvoices = [];
   const errors = [];
+  const processedSOSet = new Set(); // Track processed SO numbers to prevent duplicates
   let browser = null;
   
   try {
@@ -516,19 +593,23 @@ export async function runFulcrumProcessor(username, password, headless = true) {
     // Process all pages
     let pageCount = 0;
     let hasMorePages = true;
-    
-    while (hasMorePages && pageCount < 20) { // RESET to 20 later Safety limit
+
+    while (hasMorePages && pageCount < 20) { // Safety limit
       pageCount++;
       console.log(`\n[Main] Processing page ${pageCount}...\n`);
-      
-      const pageProcessed = await processPage(page, processedInvoices, errors);
-      
+
+      const pageProcessed = await processPage(page, processedInvoices, errors, processedSOSet);
+
       if (!pageProcessed) {
-        console.log('[Main] No rows processed, stopping');
+        console.log('[Main] Page processing failed, stopping');
         break;
       }
-      
+
       hasMorePages = await checkNextPage(page);
+    }
+
+    if (pageCount >= 20) {
+      console.log('[Main] WARNING: Hit page limit safety check (20 pages)');
     }
     
     console.log('\n=== FULCRUM COMPLETE ===');

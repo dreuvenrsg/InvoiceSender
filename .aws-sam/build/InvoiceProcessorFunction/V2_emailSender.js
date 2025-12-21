@@ -20,8 +20,8 @@ import { runFulcrumProcessor } from './fulcrumProcessor.js';
 import { SSMClient, GetParameterCommand, PutParameterCommand } from "@aws-sdk/client-ssm";
 import { SESClient, SendEmailCommand } from "@aws-sdk/client-ses";
 
-const ssmClient = new SSMClient({ region: process.env.AWS_REGION || 'us-east-2' });
-const sesClient = new SESClient({ region: process.env.AWS_REGION || 'us-east-2' });
+const ssmClient = new SSMClient({ region: process.env.AWS_REGION || 'us-west-1' });
+const sesClient = new SESClient({ region: process.env.AWS_REGION || 'us-west-1' });
 
 // ===========================
 // Configuration Module
@@ -43,7 +43,7 @@ const config = {
   production: {
     CLIENT_ID: "ABFEj4xs3FW9f1oCAEXrH0Ww04eFdJAbQSQwbq03imSVrkXLY4",
     CLIENT_SECRET: "5sYuOuGpVmHWErATqsUk4jmIrDfIu2GtnHy5sWfc",
-    REFRESH_TOKEN: "RT1-191-H0-1766201748i8ikavafpsx62z3jczlc",
+    REFRESH_TOKEN: "RT1-130-H0-1774055940wv9v4sjzw6d75pvomba6",
     ACCESS_TOKEN: "eyJhbGciOiJkaXIiLCJlbmMiOiJBMTI4Q0JDLUhTMjU2IiwieC5vcmciOiJIMCJ9..uzkKkgTR5wNRDgyy1GP2Zg.qyUWS_USgJz1-i-eKuVPNI9piBTrmpU5xioSNTH-Yg83aOVZ52nn2ZsZHTVCH7dXe_E1R1xKE81k5cSLeLZiwJo7xBn3Sy1VNwOn2saLNX1vxxdbE--9Fe9zRURLuLh3nEmVXroDIJwUXvO7uU-7EV1axA2av8ke2HmVu0Wx1TYhDBOLXyjPny1AYih-b4KmrEPfqoaweA7r1aGlFzOfdMRTOGRsUouhD62gS0504AFdiw1NbrnHfHkXWRqwbCxg0qOI2b0JZXjpVk0BWBDk2ZGfUXkqTY56hZfXl6GJmMecy9rdf-i8Sv59R3p3q1YvcK3Iz5RBgwsunHiYWS-ag8wiUBj368lbOxgiB4M14Z6Xa2q1aoXgRUg7OWI_dueia_FxPDwf-Zz-js_nTMfkfxWR9eNcfzGUYpN3_A6iLZW05q7Z1x0MRAgahC8JIBDuDj5PkvwvS-AWEDA85zNk6A6FBlGaT3RgWmgR6jciGiFYVLb0Qpf9E1Ih11La6eFmO9nPNaY6GbYj956Emu3IQjIIiq6xHOVNkpt80yiBi-v7jptd_lnG6da31ADevDPhEqbD_xbo5iwyc3APsAgAOnth3bOwMkfyydEI-Gd-qmN79MgPhhRoCo7E9A9iPAA1.3gSHSpuljCbWyI0X4cSTZA",
     HOST: "https://quickbooks.api.intuit.com/v3/company",
     REALM_ID: "9341453397929901",
@@ -63,7 +63,7 @@ const config = {
     'Doorking', 'Alarmax', 'ASSOCIATED FIRE PROTECTION', 'VES FIRE DETECTION SYSTEMS', '3S INCORPORATED'
     , 'ADI/TEXAS', 'Fire Device Company', 'Dortronics', 'MAMMOTH FIRE', 'Main Fire & Security'
     , 'DOORTEK SYSTEMS', 'BROOKS EQUIPMENT CO.', 'Killark', 'EZ Fire Inc', 'MONACO ENTERPRISES'
-    , 'HLI Solutions, Inc.', 'HIGH RISE PROTECTION', 'US ALARM & DETECTION SUPPLY, LLC', 'FIKE CORPORATION'
+    , 'HIGH RISE PROTECTION', 'US ALARM & DETECTION SUPPLY, LLC', 'FIKE CORPORATION'
     , 'HUBBELL CARIBE LIMITED', 'Life Safety Consultants', 'FIRE ALARM.COM', 'UNICOM INC.'
     , 'OMLID & SWINNEY', 'MADISON SERVICE CORP.', 'SECURE DOOR & HARDWARE'
     , 'TOMCO SYSTEMS', 'RAVEL ELECTRONICS PVT LTD', 'TOTAL DOOR, AN OPENINGS COMPANY'
@@ -72,7 +72,9 @@ const config = {
     , 'ACCESS HARDWARE', 'GENERAL MONITORS SYSTEMS', 'SYSTEM DISTRIBUTORS'
     , 'CB Doors and Hardware, Inc.', 'Kidde Edwards', 'CHUBB-EDWARDS CANADA'
     , 'SECURITY WHOLESALERS INC.', 'TOMAR ELECTRONICS, INC', 'AUTOMATIC BUILDING CONTROLS'
-    , 'KIDDE FENWAL INC', 'APS Fire Co', 'SAFETY STORAGE INC.'
+    , 'KIDDE FENWAL INC', 'APS Fire Co', 'SAFETY STORAGE INC.', 'JM ELECTRONIC ENGINEERING INC.'
+    , 'JIMS MACHINE', 'SIGNAL SOURCE', 'CONTINENTAL ALARM & DET. /NE'
+    //'HLI Solutions, Inc.' ADD BACK IN AFTER JAN 1st, 2026
   ]
 };
 
@@ -1171,7 +1173,9 @@ const invoiceProcessor = {
   async processInvoice(invoice, customersMap) {
     await sleep(50); // small pacing
     // console.log(`\n[Processor] === Processing Invoice ID: ${invoice.Id} ===`);
-
+    if (invoice.DocNumber == 'F7045'){
+      console.log('Issue over here. Break break dance dance.');
+    }
     try {
       // Get full invoice details
       const fullInvoice = await invoiceModule.getFullInvoice(invoice.Id);
@@ -1435,6 +1439,20 @@ if (import.meta.url === `file://${process.argv[1]}`) {
       
     } catch (err) {
       console.error('\n✗ Local execution failed:', err);
+
+      // Try to send error notification email
+      try {
+        await emailModule.sendSummaryEmail(
+          { processed: 0, sent: 0, skipped: 0, errors: 1, details: [
+            { status: 'error', invoiceId: 'SYSTEM', error: `Fatal system error: ${err.message}\n\nStack trace:\n${err.stack}` }
+          ]},
+          fulcrumResults
+        );
+        console.log('[Email] Error notification sent');
+      } catch (emailError) {
+        console.error('[Email] Failed to send error notification:', emailError.message);
+      }
+
       process.exit(1);
     }
   })();
@@ -1627,16 +1645,29 @@ export const handler = async (event, context) => {
     
   } catch (error) {
     console.error('[Lambda] Fatal error:', error);
-    
+
     try {
-      await emailModule.sendSummaryEmail(
-        qboResults || { processed: 0, sent: 0, skipped: 0, errors: 0, details: [] },
-        fulcrumResults
-      );
+      // Create error details for the email
+      const errorResults = qboResults || { processed: 0, sent: 0, skipped: 0, errors: 1, details: [
+        { status: 'error', invoiceId: 'SYSTEM', error: `Fatal system error: ${error.message}\n\nStack trace:\n${error.stack}` }
+      ]};
+
+      // If qboResults exists but doesn't have this error, add it
+      if (qboResults && !qboResults.details.some(d => d.invoiceId === 'SYSTEM')) {
+        errorResults.errors++;
+        errorResults.details.push({
+          status: 'error',
+          invoiceId: 'SYSTEM',
+          error: `Fatal system error: ${error.message}\n\nStack trace:\n${error.stack}`
+        });
+      }
+
+      await emailModule.sendSummaryEmail(errorResults, fulcrumResults);
+      console.log('[Email] Error notification sent');
     } catch (emailError) {
       console.error('[Email] Failed to send error notification:', emailError);
     }
-    
+
     throw error;
   }
 };

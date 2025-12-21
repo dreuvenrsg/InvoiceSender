@@ -25,16 +25,28 @@ Parameters:
     Default: ar@rsgsecurity.com
   DeployRegion:
     Type: String
-    Default: us-east-2
+    Default: us-west-1
   # Public Chrome layer ARN (region-specific). Override if needed.
   ChromiumLayerArn:
     Type: String
-    Default: arn:aws:lambda:us-east-2:764866452798:layer:chrome-aws-lambda:50
-    Description: Public Chrome AWS Lambda layer for us-east-2 (includes Chromium + shared libs)
+    Default: arn:aws:lambda:us-west-1:764866452798:layer:chrome-aws-lambda:50
+    Description: Public Chrome AWS Lambda layer for us-west-1 (includes Chromium + shared libs)
+  LogRetentionInDays:
+    Type: Number
+    Default: 30
+    Description: Number of days to retain CloudWatch logs
 
 Resources:
+  # CloudWatch Logs Group
+  InvoiceProcessorLogGroup:
+    Type: AWS::Logs::LogGroup
+    Properties:
+      LogGroupName: /aws/lambda/RSGInvoiceProcessor
+      RetentionInDays: !Ref LogRetentionInDays
+
   InvoiceProcessorFunction:
     Type: AWS::Serverless::Function
+    DependsOn: InvoiceProcessorLogGroup
     Metadata:
       BuildMethod: nodejs20.x
     Properties:
@@ -57,10 +69,9 @@ Resources:
               Resource: "*"
             - Effect: Allow
               Action:
-                - logs:CreateLogGroup
                 - logs:CreateLogStream
                 - logs:PutLogEvents
-              Resource: "*"
+              Resource: !GetAtt InvoiceProcessorLogGroup.Arn
       Events:
         Daily5pmPT:
           Type: ScheduleV2
@@ -79,6 +90,9 @@ Outputs:
   FunctionArn:
     Description: Deployed Lambda function ARN
     Value: !GetAtt InvoiceProcessorFunction.Arn
+  LogGroupName:
+    Description: CloudWatch Logs group name
+    Value: !Ref InvoiceProcessorLogGroup
   UsingChromiumLayer:
     Description: Chromium layer ARN used by the function
     Value: !Ref ChromiumLayerArn

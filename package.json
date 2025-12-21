@@ -12,10 +12,10 @@
     "build": "sam build",
     "deploy-guided": "sam deploy --guided",
     "deploy": "sam build && sam deploy --no-confirm-changeset --stack-name rsg-invoice-processor --resolve-s3 --capabilities CAPABILITY_IAM",
-    "remove": "aws cloudformation delete-stack --stack-name rsg-invoice-processor --region us-east-2",
-    "info": "aws cloudformation describe-stacks --stack-name rsg-invoice-processor --region us-east-2",
+    "remove": "aws cloudformation delete-stack --stack-name rsg-invoice-processor --region us-west-1",
+    "info": "aws cloudformation describe-stacks --stack-name rsg-invoice-processor --region us-west-1",
     "invoke-local": "sam local invoke InvoiceProcessorFunction --event events/invoke.json",
-    "logs": "aws logs tail /aws/lambda/RSGInvoiceProcessor --region us-east-2 --follow --since 1h"
+    "logs": "aws logs tail /aws/lambda/RSGInvoiceProcessor --region us-west-1 --follow --since 1h"
   },
   "dependencies": {
     "@aws-sdk/client-ssm": "^3.470.0",
