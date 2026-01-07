@@ -1,6 +1,0 @@
-{
-  "type": "node",
-  "request": "launch",
-  "name": "Debug send_unsent_invoices",
-  "program": "${workspaceFolder}/send_unsent_invoices.js",
-}

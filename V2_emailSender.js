@@ -75,7 +75,7 @@ const config = {
     , 'KIDDE FENWAL INC', 'APS Fire Co', 'SAFETY STORAGE INC.', 'JM ELECTRONIC ENGINEERING INC.'
     , 'JIMS MACHINE', 'SIGNAL SOURCE', 'CONTINENTAL ALARM & DET. /NE'
     , 'IRL SYSTEMS', 'R.B. ALLEN CO', 'Best System Sales'
-    //'HLI Solutions, Inc.' ADD BACK IN AFTER JAN 1st, 2026
+    , 'HLI Solutions, Inc.' 
   ]
 };
 
