@@ -75,7 +75,7 @@ const config = {
     , 'KIDDE FENWAL INC', 'APS Fire Co', 'SAFETY STORAGE INC.', 'JM ELECTRONIC ENGINEERING INC.'
     , 'JIMS MACHINE', 'SIGNAL SOURCE', 'CONTINENTAL ALARM & DET. /NE'
     , 'IRL SYSTEMS', 'R.B. ALLEN CO', 'Best System Sales'
-    , 'HLI Solutions, Inc.', 'BRONCO FIRE ALARM SYS.'
+    , 'HLI Solutions, Inc.', 'BRONCO FIRE ALARM SYS.', 'Servo Dynamics Engineering Co., LTD'
   ]
 };
 
