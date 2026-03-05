@@ -182,6 +182,75 @@ async function verifyNeedsActionActive(page) {
   return isActive;
 }
 
+// Read paginator state from the current table view
+async function getPageInfo(page) {
+  return page.evaluate(() => {
+    const allPages = Array.from(document.querySelectorAll('.p-paginator-page'));
+    const currentPage = document.querySelector('.p-paginator-page.p-paginator-page-selected');
+    const nextButton = document.querySelector('.p-paginator-next');
+    const isNextDisabled = !!nextButton && (
+      nextButton.classList.contains('p-paginator-element-disabled') ||
+      nextButton.disabled ||
+      nextButton.getAttribute('aria-disabled') === 'true'
+    );
+
+    const parsedCurrent = currentPage ? parseInt(currentPage.textContent.trim(), 10) : 1;
+
+    return {
+      totalPages: allPages.length,
+      currentPageNum: Number.isNaN(parsedCurrent) ? 1 : parsedCurrent,
+      hasNextButton: !!nextButton,
+      isNextDisabled
+    };
+  });
+}
+
+// Restore paginator to the desired page after reloading NEEDS ACTION
+async function goToPage(page, targetPageNum) {
+  if (!targetPageNum || targetPageNum <= 1) return;
+
+  let pageInfo = await getPageInfo(page);
+  if (pageInfo.totalPages <= 1) return;
+
+  const desiredPage = Math.min(targetPageNum, pageInfo.totalPages);
+  if (desiredPage <= pageInfo.currentPageNum) return;
+
+  let attempts = 0;
+  while (pageInfo.currentPageNum < desiredPage && attempts < desiredPage + 5) {
+    const clicked = await page.evaluate(() => {
+      const nextButton = document.querySelector('.p-paginator-next');
+      if (nextButton && !nextButton.classList.contains('p-paginator-element-disabled')) {
+        nextButton.click();
+        return true;
+      }
+      return false;
+    });
+
+    if (!clicked) {
+      console.log(`[Pagination] Could not advance from page ${pageInfo.currentPageNum} while restoring to page ${desiredPage}`);
+      return;
+    }
+
+    await delay(config.timeouts.pageStabilization);
+    const previousPageNum = pageInfo.currentPageNum;
+    pageInfo = await getPageInfo(page);
+    attempts++;
+
+    if (pageInfo.currentPageNum <= previousPageNum) {
+      console.log(`[Pagination] Page did not advance while restoring (still at ${pageInfo.currentPageNum})`);
+      return;
+    }
+  }
+
+  console.log(`[Pagination] Restored to page ${pageInfo.currentPageNum}/${pageInfo.totalPages}`);
+}
+
+async function returnToNeedsActionPage(page, targetPageNum) {
+  await goToInvoicing(page);
+  await clickNeedsAction(page);
+  await goToPage(page, targetPageNum);
+}
+
 // Extract data from a row
 async function extractRowData(row) {
   try {
@@ -228,7 +297,7 @@ function shouldProcessRow(balance, total, hasRefund, hasCreate, hasIssue) {
 }
 
 // Process a row with "Create" button (Create → Issue workflow)
-async function processCreate(page, row, rowData, errors) {
+async function processCreate(page, row, rowData, errors, targetPageNum) {
   try {
     console.log(`[Row] Processing CREATE for ${rowData.soNumber}...`);
     
@@ -293,10 +362,7 @@ async function processCreate(page, row, rowData, errors) {
     await delay(config.timeouts.modalWait);
     console.log(`[Row] ✓ ${rowData.soNumber} created & issued`);
     
-    await goToInvoicing(page);
-    
-    // Re-click NEEDS ACTION
-    await clickNeedsAction(page);
+    await returnToNeedsActionPage(page, targetPageNum);
     
     return true;
   } catch (error) {
@@ -306,8 +372,7 @@ async function processCreate(page, row, rowData, errors) {
       
       // Try to recover
       try {
-        await goToInvoicing(page);
-        await clickNeedsAction(page);
+        await returnToNeedsActionPage(page, targetPageNum);
       } catch (recoveryError) {
         console.error('[Row] Recovery failed:', recoveryError.message);
       }
@@ -317,7 +382,7 @@ async function processCreate(page, row, rowData, errors) {
 }
 
 // Process a row with "Issue" button (Issue only)
-async function processIssue(page, row, rowData, errors) {
+async function processIssue(page, row, rowData, errors, targetPageNum) {
   try {
     console.log(`[Row] Processing ISSUE for ${rowData.soNumber}...`);
     
@@ -375,8 +440,7 @@ async function processIssue(page, row, rowData, errors) {
     await delay(config.timeouts.modalWait);
     console.log(`[Row] ✓ ${rowData.soNumber} issued`);
     
-    // Re-click NEEDS ACTION
-    await clickNeedsAction(page);
+    await returnToNeedsActionPage(page, targetPageNum);
     
     return true;
   } catch (error) {
@@ -386,8 +450,7 @@ async function processIssue(page, row, rowData, errors) {
     
     // Try to recover
     try {
-      await goToInvoicing(page);
-      await clickNeedsAction(page);
+      await returnToNeedsActionPage(page, targetPageNum);
     } catch (recoveryError) {
       console.error('[Row] Recovery failed:', recoveryError.message);
     }
@@ -404,6 +467,9 @@ async function processPage(page, processedInvoices, errors, processedSOSet) {
   try {
     // Keep scanning current page until no unprocessed rows found
     while (true) {
+      const pageInfo = await getPageInfo(page);
+      const currentPageNum = pageInfo.currentPageNum;
+
       await page.waitForSelector('cdk-row', { visible: true, timeout: config.timeouts.elementWait });
 
       const rows = await page.$$('cdk-row');
@@ -454,10 +520,10 @@ async function processPage(page, processedInvoices, errors, processedSOSet) {
         let action = '';
 
         if (hasCreate) {
-          success = await processCreate(page, row, rowData, errors);
+          success = await processCreate(page, row, rowData, errors, currentPageNum);
           action = 'Created & Issued';
         } else if (hasIssue) {
-          success = await processIssue(page, row, rowData, errors);
+          success = await processIssue(page, row, rowData, errors, currentPageNum);
           action = 'Issued';
         } else {
           console.log(`[Process] No action button for ${rowData.soNumber}`);
@@ -501,24 +567,7 @@ async function processPage(page, processedInvoices, errors, processedSOSet) {
 // Check for and click next page
 async function checkNextPage(page) {
   try {
-    // Get all page buttons
-    const pageInfo = await page.evaluate(() => {
-      const allPages = Array.from(document.querySelectorAll('.p-paginator-page'));
-      const currentPage = document.querySelector('.p-paginator-page.p-paginator-page-selected');
-      const nextButton = document.querySelector('.p-paginator-next');
-      const isNextDisabled = nextButton && (
-        nextButton.classList.contains('p-paginator-element-disabled') ||
-        nextButton.disabled ||
-        nextButton.getAttribute('aria-disabled') === 'true'
-      );
-
-      return {
-        totalPages: allPages.length,
-        currentPageNum: currentPage ? parseInt(currentPage.textContent.trim()) : 1,
-        hasNextButton: !!nextButton,
-        isNextDisabled: isNextDisabled
-      };
-    });
+    const pageInfo = await getPageInfo(page);
 
     console.log(`[Pagination] Current page: ${pageInfo.currentPageNum}/${pageInfo.totalPages}`);
 
