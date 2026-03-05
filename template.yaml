@@ -1,10 +1,10 @@
 AWSTemplateFormatVersion: '2010-09-09'
 Transform: AWS::Serverless-2016-10-31
-Description: RSG Invoice Processor (SAM) — Node.js 20 + public Chromium layer
+Description: RSG Invoice Processor (SAM) — Node.js 22 + public Chromium layer
 
 Globals:
   Function:
-    Runtime: nodejs20.x            # ← Node 20 to avoid libc/libnspr issues
+    Runtime: nodejs22.x            # ← Node 22 runtime
     Architectures: [x86_64]
     Timeout: 900
     MemorySize: 3008
@@ -29,7 +29,7 @@ Parameters:
   # Public Chrome layer ARN (region-specific). Override if needed.
   ChromiumLayerArn:
     Type: String
-    Default: arn:aws:lambda:us-west-1:764866452798:layer:chrome-aws-lambda:50
+    Default: arn:aws:lambda:us-west-1:764866452798:layer:chrome-aws-lambda:63
     Description: Public Chrome AWS Lambda layer for us-west-1 (includes Chromium + shared libs)
   LogRetentionInDays:
     Type: Number
@@ -48,7 +48,7 @@ Resources:
     Type: AWS::Serverless::Function
     DependsOn: InvoiceProcessorLogGroup
     Metadata:
-      BuildMethod: nodejs20.x
+      BuildMethod: nodejs22.x
     Properties:
       FunctionName: RSGInvoiceProcessor
       Description: Automated invoice processing - Fulcrum creation + QBO sending

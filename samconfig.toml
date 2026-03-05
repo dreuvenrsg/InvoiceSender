@@ -6,7 +6,7 @@ resolve_s3 = true
 s3_prefix = "rsg-invoice-processor"
 confirm_changeset = true
 capabilities = "CAPABILITY_IAM"
-parameter_overrides = "FromEmail=\"dreuven@rsgsecurity.com\" ToEmails=\"ar@rsgsecurity.com\" DeployRegion=\"us-west-1\""
+parameter_overrides = "FromEmail=\"dreuven@rsgsecurity.com\" ToEmails=\"ar@rsgsecurity.com\" DeployRegion=\"us-west-1\" ChromiumLayerArn=\"arn:aws:lambda:us-west-1:764866452798:layer:chrome-aws-lambda:63\""
 image_repositories = []
 
 [default.global.parameters]

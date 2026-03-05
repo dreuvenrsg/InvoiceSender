@@ -20,11 +20,11 @@
   "dependencies": {
     "@aws-sdk/client-ssm": "^3.470.0",
     "@aws-sdk/client-ses": "^3.470.0",
-    "@sparticuz/chromium": "^123.x",
-    "puppeteer-core": "^23.x"
+    "@sparticuz/chromium": "^143.0.4",
+    "puppeteer-core": "^24.38.0"
   },
   "devDependencies": {
-    "puppeteer": "^21.7.0"
+    "puppeteer": "^24.38.0"
   },
   "engines": {
     "node": ">=18.0.0"
