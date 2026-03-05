@@ -88,6 +88,22 @@ const emailModule = {
     const today = new Date();
     const dateStr = today.toISOString().split("T")[0]; 
     const subject = `QBO Invoice Processing Summary on ${dateStr} - ${results.sent} sent, ${results.skipped} skipped, ${results.errors} errors`;
+    const emailContext = {
+      subject,
+      from: this.fromEmail,
+      to: this.toEmails,
+      qbo: {
+        processed: results?.processed ?? 0,
+        sent: results?.sent ?? 0,
+        skipped: results?.skipped ?? 0,
+        errors: results?.errors ?? 0
+      },
+      fulcrum: fulcrumResults ? {
+        processed: fulcrumResults.processedInvoices?.length ?? 0,
+        errors: fulcrumResults.errors?.length ?? 0
+      } : null
+    };
+    console.log('[Email] Preparing summary email:', JSON.stringify(emailContext));
     
     var body = "";
     if(fulcrumResults){
@@ -179,10 +195,15 @@ const emailModule = {
     };
 
     try {
-      await sesClient.send(new SendEmailCommand(params));
-      console.log('[Email] Summary email sent successfully');
+      const sendResult = await sesClient.send(new SendEmailCommand(params));
+      console.log('[Email] Summary email sent successfully:', JSON.stringify({
+        messageId: sendResult?.MessageId || null,
+        to: this.toEmails,
+        subject
+      }));
     } catch (error) {
       console.error('[Email] Failed to send summary email:', error);
+      console.error('[Email] Send context:', JSON.stringify(emailContext));
     }
   }
 };
