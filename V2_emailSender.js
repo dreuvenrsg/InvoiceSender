@@ -88,6 +88,12 @@ const emailModule = {
     const today = new Date();
     const dateStr = today.toISOString().split("T")[0]; 
     const subject = `QBO Invoice Processing Summary on ${dateStr} - ${results.sent} sent, ${results.skipped} skipped, ${results.errors} errors`;
+    const skippedCustomers = [...new Set(
+      (results?.details || [])
+        .filter(d => d.status === 'skipped' && d.customer)
+        .map(d => String(d.customer).trim())
+        .filter(Boolean)
+    )].sort((a, b) => a.localeCompare(b));
     const emailContext = {
       subject,
       from: this.fromEmail,
@@ -96,7 +102,8 @@ const emailModule = {
         processed: results?.processed ?? 0,
         sent: results?.sent ?? 0,
         skipped: results?.skipped ?? 0,
-        errors: results?.errors ?? 0
+        errors: results?.errors ?? 0,
+        skippedCustomers
       },
       fulcrum: fulcrumResults ? {
         processed: fulcrumResults.processedInvoices?.length ?? 0,
@@ -142,6 +149,7 @@ const emailModule = {
       Total processed: ${results.processed}
       Successfully sent: ${results.sent}
       Skipped (excluded): ${results.skipped}
+      The set of customers that were skipped were: {${skippedCustomers.length ? skippedCustomers.join(', ') : 'None'}}
       Errors: ${results.errors}
 
     `;
