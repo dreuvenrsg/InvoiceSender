@@ -714,6 +714,73 @@ const utils = {
     const isValidEmail = s => /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(s);
     
     return [...new Set(tokens.filter(isValidEmail).map(s => s.toLowerCase()))].join(', ');
+  },
+
+  getInvoiceShipAddressText(invoice) {
+    const shipAddr = invoice?.ShipAddr || {};
+    return [
+      shipAddr.Line1,
+      shipAddr.Line2,
+      shipAddr.Line3,
+      shipAddr.Line4,
+      shipAddr.City,
+      shipAddr.CountrySubDivisionCode,
+      shipAddr.PostalCode
+    ]
+      .filter(Boolean)
+      .join(' | ');
+  },
+
+  resolveInvoiceRecipients({ invoice, customer }) {
+    const customerName = customer?.DisplayName || invoice?.CustomerRef?.name || 'Unknown Customer';
+    const primaryEmail = this.normalizeEmails(customer?.PrimaryEmail);
+    const shipAddressText = this.getInvoiceShipAddressText(invoice);
+    const shipAddressLower = shipAddressText.toLowerCase();
+
+    if (customerName.toLowerCase().includes('hli solutions')) {
+      if (
+        shipAddressLower.includes('7707 paseo de la fuente') ||
+        (shipAddressLower.includes('san diego') && shipAddressLower.includes('92154'))
+      ) {
+        return {
+          recipients: 'ap-c510@currentlighting.com',
+          source: 'hli_ship_to_san_diego',
+          rule: 'HLI San Diego / Jose orders -> AP-C510@currentlighting.com',
+          shipAddressText
+        };
+      }
+
+      if (
+        shipAddressLower.includes('2000 electric way') ||
+        shipAddressLower.includes('christiansburg')
+      ) {
+        return {
+          recipients: 'aphli@currentlighting.com',
+          source: 'hli_ship_to_christiansburg',
+          rule: 'HLI Christiansburg / Queen orders -> APHLI@currentlighting.com',
+          shipAddressText
+        };
+      }
+
+      console.warn(
+        `[Recipients] HLI ship-to address did not match a known route. Falling back to customer primary email. ` +
+        `Customer="${customerName}" ShipTo="${shipAddressText || 'None'}" Primary="${primaryEmail || 'None'}"`
+      );
+
+      return {
+        recipients: primaryEmail,
+        source: 'hli_fallback_customer_primary',
+        rule: 'HLI fallback to customer primary email because ship-to route was not matched',
+        shipAddressText
+      };
+    }
+
+    return {
+      recipients: primaryEmail,
+      source: 'customer_primary_email',
+      rule: 'Default customer primary email',
+      shipAddressText
+    };
   }
 };
 
@@ -1237,7 +1304,17 @@ const invoiceProcessor = {
       });
 
       // Recipients
-      const recipients = customer.PrimaryEmail ? utils.normalizeEmails(customer.PrimaryEmail) : '';
+      const recipientSelection = utils.resolveInvoiceRecipients({
+        invoice: fullInvoice,
+        customer
+      });
+      const recipients = recipientSelection.recipients;
+      console.log(
+        `[Processor] Recipient selection for invoice #${fullInvoice.DocNumber}: ` +
+        `customer="${customer.DisplayName}" source="${recipientSelection.source}" ` +
+        `recipients="${recipients || 'None'}" shipTo="${recipientSelection.shipAddressText || 'None'}" ` +
+        `rule="${recipientSelection.rule}"`
+      );
       if (!recipients) {
         console.log(`[Processor] ⚠️  Warning: No email addresses configured for customer ${customer.DisplayName}`);
         throw({message: `No recipients to send email to for QBO. After normalizeEmail call for customer ${customer.DisplayName}`})
@@ -1292,6 +1369,11 @@ const invoiceProcessor = {
 
       console.log(`[Processor] ✅ Successfully sent invoice #${updatedInvoice.DocNumber}`);
       console.log(`[Processor] Recipients: ${updatedInvoice.BillEmail?.Address || 'None'}`);
+      console.log(
+        `[Processor] Recipient audit for invoice #${updatedInvoice.DocNumber}: ` +
+        `source="${recipientSelection.source}" rule="${recipientSelection.rule}" ` +
+        `shipTo="${recipientSelection.shipAddressText || 'None'}"`
+      );
 
       return {
         success: true,
