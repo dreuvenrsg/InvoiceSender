@@ -80,69 +80,63 @@ const config = {
 };
 
 // Email notification module
-const emailModule = {
-  fromEmail: process.env.FROM_EMAIL || 'dreuven@rsgsecurity.com',
-  toEmails: (process.env.TO_EMAILS || 'ar@rsgsecurity.com').split(',').map(e => e.trim()),
-  
-  async sendSummaryEmail(results, fulcrumResults = null) {
-    const today = new Date();
-    const dateStr = today.toISOString().split("T")[0]; 
-    const subject = `QBO Invoice Processing Summary on ${dateStr} - ${results.sent} sent, ${results.skipped} skipped, ${results.errors} errors`;
-    const skippedCustomers = [...new Set(
-      (results?.details || [])
-        .filter(d => d.status === 'skipped' && d.customer)
-        .map(d => String(d.customer).trim())
-        .filter(Boolean)
-    )].sort((a, b) => a.localeCompare(b));
-    const emailContext = {
-      subject,
-      from: this.fromEmail,
-      to: this.toEmails,
-      qbo: {
-        processed: results?.processed ?? 0,
-        sent: results?.sent ?? 0,
-        skipped: results?.skipped ?? 0,
-        errors: results?.errors ?? 0,
-        skippedCustomers
-      },
-      fulcrum: fulcrumResults ? {
-        processed: fulcrumResults.processedInvoices?.length ?? 0,
-        errors: fulcrumResults.errors?.length ?? 0
-      } : null
-    };
-    console.log('[Email] Preparing summary email:', JSON.stringify(emailContext));
-    
-    var body = "";
-    if(fulcrumResults){
-      body = `
+function buildSummaryEmailContent(results, fulcrumResults = null, { now = new Date(), environmentLabel = activeConfig === config.sandbox ? 'SANDBOX' : 'PRODUCTION' } = {}) {
+  const dateStr = now.toISOString().split("T")[0];
+  const subject = `QBO Invoice Processing Summary on ${dateStr} - ${results.sent} sent, ${results.skipped} skipped, ${results.errors} errors`;
+  const skippedCustomers = [...new Set(
+    (results?.details || [])
+      .filter(d => d.status === 'skipped' && d.customer)
+      .map(d => String(d.customer).trim())
+      .filter(Boolean)
+  )].sort((a, b) => a.localeCompare(b));
+
+  const emailContext = {
+    subject,
+    qbo: {
+      processed: results?.processed ?? 0,
+      sent: results?.sent ?? 0,
+      skipped: results?.skipped ?? 0,
+      errors: results?.errors ?? 0,
+      skippedCustomers
+    },
+    fulcrum: fulcrumResults ? {
+      processed: fulcrumResults.processedInvoices?.length ?? 0,
+      errors: fulcrumResults.errors?.length ?? 0
+    } : null
+  };
+
+  let body = "";
+  if (fulcrumResults) {
+    body = `
         Fulcrum Sending Results
         ========================
         ${fulcrumResults.processedInvoices.length} invoices processed
         ${fulcrumResults.errors.length} errors
         The errors are: ${fulcrumResults.errors}
         
-      `
-      if (fulcrumResults.processedInvoices.length > 0) {
-        body += 'Processed Invoices:\n';
-        fulcrumResults.processedInvoices.forEach(inv => {
-          body += `- SO ${inv.soNumber}: ${inv.action} (Balance: $${inv.balance}, Total: $${inv.total})\n`;
-        });
-        body += '\n';
-      }
-
-      if (fulcrumResults.errors.length > 0) {
-        body += '\n⚠️ FULCRUM ERRORS:\n';
-        fulcrumResults.errors.forEach(err => {
-          body += `- ${err}\n`;
-        });
-        body += '\n';
-      }
+      `;
+    if (fulcrumResults.processedInvoices.length > 0) {
+      body += 'Processed Invoices:\n';
+      fulcrumResults.processedInvoices.forEach(inv => {
+        body += `- SO ${inv.soNumber}: ${inv.action} (Balance: $${inv.balance}, Total: $${inv.total})\n`;
+      });
+      body += '\n';
     }
-    body += `
+
+    if (fulcrumResults.errors.length > 0) {
+      body += '\n⚠️ FULCRUM ERRORS:\n';
+      fulcrumResults.errors.forEach(err => {
+        body += `- ${err}\n`;
+      });
+      body += '\n';
+    }
+  }
+
+  body += `
       QBO Invoice Processing Summary
       ==============================
-      Date: ${new Date().toISOString()}
-      Environment: ${activeConfig === config.sandbox ? 'SANDBOX' : 'PRODUCTION'}
+      Date: ${now.toISOString()}
+      Environment: ${environmentLabel}
 
       Results:
       --------
@@ -154,34 +148,53 @@ const emailModule = {
 
     `;
 
-    if (results.sent > 0) {
-      body += '\nSuccessfully Sent:\n';
-      results.details
-        .filter(d => d.status === 'sent')
-        .forEach(d => {
-          body += `- Invoice ${d.invoiceNumber}: sent to ${d.email}\n`;
-        });
-    }
+  if (results.sent > 0) {
+    body += '\nSuccessfully Sent:\n';
+    results.details
+      .filter(d => d.status === 'sent')
+      .forEach(d => {
+        body += `- Invoice ${d.invoiceNumber}: sent to ${d.email}\n`;
+      });
+  }
 
-    if (results.skipped > 0) {
-      body += '\n\n\nSkipped:\n\n';
-      results.details
-        .filter(d => d.status === 'skipped')
-        .forEach(d => {
-          if(!(d.customer.toLowerCase().includes('honeywell') || d.customer.toLowerCase().includes('siemens'))){
-            body += `- Skipped invoice: ${d.invoiceId} for customer: ${d.customer} and was skipped because reason: ${d.reason}\n`;
-          }
-        });
-    }
+  if (results.skipped > 0) {
+    body += '\n\n\nSkipped:\n\n';
+    results.details
+      .filter(d => d.status === 'skipped')
+      .forEach(d => {
+        body += `- Skipped invoice: ${d.invoiceId} for customer: ${d.customer} and was skipped because reason: ${d.reason}\n`;
+      });
+  }
 
-    if (results.errors > 0) {
-        body += '\n\n\n ERROR DETAILS:\n\n';
-        results.details
-          .filter(d => d.status === 'error')
-          .forEach(d => {
-            body += `- Error with invoice: ${d.invoiceId} with error: ${d.error}\n`;
-          });
-    }
+  if (results.errors > 0) {
+    body += '\n\n\n ERROR DETAILS:\n\n';
+    results.details
+      .filter(d => d.status === 'error')
+      .forEach(d => {
+        body += `- Error with invoice: ${d.invoiceId} with error: ${d.error}\n`;
+      });
+  }
+
+  return {
+    subject,
+    body,
+    skippedCustomers,
+    emailContext
+  };
+}
+
+const emailModule = {
+  fromEmail: process.env.FROM_EMAIL || 'dreuven@rsgsecurity.com',
+  toEmails: (process.env.TO_EMAILS || 'ar@rsgsecurity.com').split(',').map(e => e.trim()),
+  
+  async sendSummaryEmail(results, fulcrumResults = null) {
+    const { subject, body, emailContext } = buildSummaryEmailContent(results, fulcrumResults);
+    const fullEmailContext = {
+      ...emailContext,
+      from: this.fromEmail,
+      to: this.toEmails
+    };
+    console.log('[Email] Preparing summary email:', JSON.stringify(fullEmailContext));
 
     const params = {
       Source: this.fromEmail,
@@ -211,7 +224,7 @@ const emailModule = {
       }));
     } catch (error) {
       console.error('[Email] Failed to send summary email:', error);
-      console.error('[Email] Send context:', JSON.stringify(emailContext));
+      console.error('[Email] Send context:', JSON.stringify(fullEmailContext));
     }
   }
 };
@@ -1578,9 +1591,11 @@ export {
   invoiceModule,
   customerModule,
   shippingModule,
+  emailModule,
   utils,
   externalDataModule,
-  invoiceProcessor
+  invoiceProcessor,
+  buildSummaryEmailContent
 };
 
 // ---- utils: dates (add once) ----

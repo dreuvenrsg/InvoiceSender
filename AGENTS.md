@@ -77,13 +77,15 @@ npm run logs
 
 ## Validation Expectations
 
-- There is no formal automated test suite in this repo.
+- There is a regression test suite for summary-email reporting and invoice recipient routing.
 - For code changes, run the narrowest useful validation:
+  - `npm test` before marking a code change complete
   - `npm run build` for SAM/package validation
   - `node V2_emailSender.js` for local behavior when safe and credentials are available
   - `npm run invoke-local` for Lambda-path changes when the local event/config is set up
 - If a change affects Fulcrum browser automation, note whether local interactive verification was or was not performed.
 - When a change affects invoice sending, validate not only that invoices were sent, but where they were sent, using real observable outputs when available.
+- If a change affects summary emails or recipient routing, verify that `npm test` covers the scenario and passes before saying the work is complete.
 
 ## Testing Principle
 
@@ -95,6 +97,10 @@ Use this testing model when adding or changing behavior:
 4. Treat mismatches, ambiguities, and operator corrections as structured inputs that improve the system.
 
 In practice for this repo, prefer validations tied to real outputs such as QBO results, Fulcrum state changes, SES payloads, logs, and recorded send destinations over tests that only prove a function was called.
+Use the regression tests to protect:
+- excluded-customer visibility in summary emails
+- HLI ship-to routing
+- default customer-primary-email recipient selection
 
 ## Deployment Notes
 
