@@ -9,6 +9,16 @@ test('summary email separates explicit exclusions from allowlist misses', () => 
     sent: 0,
     skipped: 3,
     errors: 0,
+    candidatePolicySummary: {
+      candidateInvoiceCount: 5,
+      uniqueCustomerCount: 4,
+      sendableCustomers: ['Johnson Controls Fire Protection LP'],
+      explicitlyExcludedCustomers: ['HONEYWELL FIRE SYSTEMS, US', 'SIEMENS CANADA LIMITED'],
+      allowlistMissCustomers: ['Summit Fire & Security'],
+      sendableInvoiceCount: 2,
+      explicitlyExcludedInvoiceCount: 2,
+      allowlistMissInvoiceCount: 1
+    },
     details: [
       {
         invoiceId: 'F1001',
@@ -59,8 +69,11 @@ test('summary email separates explicit exclusions from allowlist misses', () => 
   ]);
   assert.deepEqual(emailContext.qbo.explicitlyExcludedCustomers, explicitlyExcludedCustomers);
   assert.deepEqual(emailContext.qbo.allowlistMissCustomers, allowlistMissCustomers);
+  assert.equal(emailContext.qbo.candidatePolicySummary.candidateInvoiceCount, 5);
   assert.match(body, /Explicitly excluded customers: \{HONEYWELL FIRE SYSTEMS, US, SIEMENS CANADA LIMITED\}/);
   assert.match(body, /Customers skipped because not in allowlist: \{Summit Fire & Security\}/);
+  assert.match(body, /Candidate invoices before processing: 5/);
+  assert.match(body, /Sendable customers considered: \{Johnson Controls Fire Protection LP\}/);
   assert.match(body, /Skipped invoice: F1001 for customer: SIEMENS CANADA LIMITED and was skipped because category: explicit_exclusion/);
   assert.match(body, /Skipped invoice: F1003 for customer: Summit Fire & Security and was skipped because category: allowlist_miss/);
 });
@@ -82,6 +95,30 @@ test('customer skip policy distinguishes explicit exclusions from allowlist miss
     shouldSkip: false,
     skipCategory: null,
     reason: null
+  });
+});
+
+test('candidate policy summary reports sendable and skipped customer groups', () => {
+  const summary = customerModule.summarizeInvoicePolicies([
+    { CustomerRef: { value: '1', name: 'Honeywell Fire Systems, US' } },
+    { CustomerRef: { value: '2', name: 'Summit Fire & Security' } },
+    { CustomerRef: { value: '3', name: 'Johnson Controls Fire Protection LP' } },
+    { CustomerRef: { value: '3', name: 'Johnson Controls Fire Protection LP' } }
+  ], {
+    '1': { DisplayName: 'Honeywell Fire Systems, US' },
+    '2': { DisplayName: 'Summit Fire & Security' },
+    '3': { DisplayName: 'Johnson Controls Fire Protection LP' }
+  });
+
+  assert.deepEqual(summary, {
+    candidateInvoiceCount: 4,
+    uniqueCustomerCount: 3,
+    sendableCustomers: ['Johnson Controls Fire Protection LP'],
+    explicitlyExcludedCustomers: ['Honeywell Fire Systems, US'],
+    allowlistMissCustomers: ['Summit Fire & Security'],
+    sendableInvoiceCount: 2,
+    explicitlyExcludedInvoiceCount: 1,
+    allowlistMissInvoiceCount: 1
   });
 });
 

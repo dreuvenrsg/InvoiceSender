@@ -84,6 +84,16 @@ function buildSummaryEmailContent(results, fulcrumResults = null, { now = new Da
   const dateStr = now.toISOString().split("T")[0];
   const subject = `QBO Invoice Processing Summary on ${dateStr} - ${results.sent} sent, ${results.skipped} skipped, ${results.errors} errors`;
   const details = results?.details || [];
+  const candidatePolicySummary = results?.candidatePolicySummary || {
+    candidateInvoiceCount: 0,
+    uniqueCustomerCount: 0,
+    sendableCustomers: [],
+    explicitlyExcludedCustomers: [],
+    allowlistMissCustomers: [],
+    sendableInvoiceCount: 0,
+    explicitlyExcludedInvoiceCount: 0,
+    allowlistMissInvoiceCount: 0
+  };
   const uniqueSortedCustomers = (filterFn) => [...new Set(
     details
       .filter(filterFn)
@@ -109,7 +119,8 @@ function buildSummaryEmailContent(results, fulcrumResults = null, { now = new Da
       errors: results?.errors ?? 0,
       skippedCustomers,
       explicitlyExcludedCustomers,
-      allowlistMissCustomers
+      allowlistMissCustomers,
+      candidatePolicySummary
     },
     fulcrum: fulcrumResults ? {
       processed: fulcrumResults.processedInvoices?.length ?? 0,
@@ -159,6 +170,17 @@ function buildSummaryEmailContent(results, fulcrumResults = null, { now = new Da
       Customers skipped because not in allowlist: {${allowlistMissCustomers.length ? allowlistMissCustomers.join(', ') : 'None'}}
       All skipped customers: {${skippedCustomers.length ? skippedCustomers.join(', ') : 'None'}}
       Errors: ${results.errors}
+
+    `;
+
+  body += `
+      Candidate Customer Policy Snapshot
+      ---------------------------------
+      Candidate invoices before processing: ${candidatePolicySummary.candidateInvoiceCount}
+      Unique candidate customers: ${candidatePolicySummary.uniqueCustomerCount}
+      Sendable customers considered: {${candidatePolicySummary.sendableCustomers.length ? candidatePolicySummary.sendableCustomers.join(', ') : 'None'}}
+      Explicitly excluded customers considered: {${candidatePolicySummary.explicitlyExcludedCustomers.length ? candidatePolicySummary.explicitlyExcludedCustomers.join(', ') : 'None'}}
+      Customers considered but not in allowlist: {${candidatePolicySummary.allowlistMissCustomers.length ? candidatePolicySummary.allowlistMissCustomers.join(', ') : 'None'}}
 
     `;
 
@@ -689,6 +711,44 @@ const customerModule = {
 
   isExcludedCustomer(customerName) {
     return this.getSkipPolicy(customerName).shouldSkip;
+  },
+
+  summarizeInvoicePolicies(invoices, customersMap = {}) {
+    const customerNamesByCategory = {
+      sendable: new Set(),
+      explicit_exclusion: new Set(),
+      allowlist_miss: new Set()
+    };
+    const invoiceCountsByCategory = {
+      sendable: 0,
+      explicit_exclusion: 0,
+      allowlist_miss: 0
+    };
+
+    for (const invoice of invoices || []) {
+      const customerName =
+        customersMap[invoice?.CustomerRef?.value]?.DisplayName ||
+        invoice?.CustomerRef?.name ||
+        'Unknown Customer';
+      const skipPolicy = this.getSkipPolicy(customerName);
+      const category = skipPolicy.shouldSkip ? skipPolicy.skipCategory : 'sendable';
+
+      customerNamesByCategory[category].add(customerName);
+      invoiceCountsByCategory[category]++;
+    }
+
+    return {
+      candidateInvoiceCount: (invoices || []).length,
+      uniqueCustomerCount: new Set(
+        Object.values(customerNamesByCategory).flatMap(names => [...names])
+      ).size,
+      sendableCustomers: [...customerNamesByCategory.sendable].sort((a, b) => a.localeCompare(b)),
+      explicitlyExcludedCustomers: [...customerNamesByCategory.explicit_exclusion].sort((a, b) => a.localeCompare(b)),
+      allowlistMissCustomers: [...customerNamesByCategory.allowlist_miss].sort((a, b) => a.localeCompare(b)),
+      sendableInvoiceCount: invoiceCountsByCategory.sendable,
+      explicitlyExcludedInvoiceCount: invoiceCountsByCategory.explicit_exclusion,
+      allowlistMissInvoiceCount: invoiceCountsByCategory.allowlist_miss
+    };
   }
 };
 
@@ -1495,6 +1555,9 @@ const app = {
       console.log('👥 Loading customer information...');
       const customersMap = await customerModule.getCustomersMap(invoices);
       console.log(`Loaded ${Object.keys(customersMap).length} unique customer(s).\n`);
+
+      const candidatePolicySummary = customerModule.summarizeInvoicePolicies(invoices, customersMap);
+      console.log('[Customer] Candidate policy summary:', JSON.stringify(candidatePolicySummary));
       
       // Step 3: Process each invoice
       console.log('📨 Processing invoices...');
@@ -1505,7 +1568,8 @@ const app = {
         sent: 0,
         skipped: 0,
         errors: 0,
-        details: []
+        details: [],
+        candidatePolicySummary
       };
     
       for (const invoice of invoices) {
