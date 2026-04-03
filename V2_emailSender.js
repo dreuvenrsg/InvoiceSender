@@ -83,12 +83,22 @@ const config = {
 function buildSummaryEmailContent(results, fulcrumResults = null, { now = new Date(), environmentLabel = activeConfig === config.sandbox ? 'SANDBOX' : 'PRODUCTION' } = {}) {
   const dateStr = now.toISOString().split("T")[0];
   const subject = `QBO Invoice Processing Summary on ${dateStr} - ${results.sent} sent, ${results.skipped} skipped, ${results.errors} errors`;
-  const skippedCustomers = [...new Set(
-    (results?.details || [])
-      .filter(d => d.status === 'skipped' && d.customer)
-      .map(d => String(d.customer).trim())
+  const details = results?.details || [];
+  const uniqueSortedCustomers = (filterFn) => [...new Set(
+    details
+      .filter(filterFn)
+      .map(d => String(d.customer || '').trim())
       .filter(Boolean)
   )].sort((a, b) => a.localeCompare(b));
+  const explicitlyExcludedCustomers = uniqueSortedCustomers(
+    d => d.status === 'skipped' && d.skipCategory === 'explicit_exclusion'
+  );
+  const allowlistMissCustomers = uniqueSortedCustomers(
+    d => d.status === 'skipped' && d.skipCategory === 'allowlist_miss'
+  );
+  const skippedCustomers = uniqueSortedCustomers(
+    d => d.status === 'skipped'
+  );
 
   const emailContext = {
     subject,
@@ -97,7 +107,9 @@ function buildSummaryEmailContent(results, fulcrumResults = null, { now = new Da
       sent: results?.sent ?? 0,
       skipped: results?.skipped ?? 0,
       errors: results?.errors ?? 0,
-      skippedCustomers
+      skippedCustomers,
+      explicitlyExcludedCustomers,
+      allowlistMissCustomers
     },
     fulcrum: fulcrumResults ? {
       processed: fulcrumResults.processedInvoices?.length ?? 0,
@@ -142,8 +154,10 @@ function buildSummaryEmailContent(results, fulcrumResults = null, { now = new Da
       --------
       Total processed: ${results.processed}
       Successfully sent: ${results.sent}
-      Skipped (excluded): ${results.skipped}
-      The set of customers that were skipped were: {${skippedCustomers.length ? skippedCustomers.join(', ') : 'None'}}
+      Skipped (policy): ${results.skipped}
+      Explicitly excluded customers: {${explicitlyExcludedCustomers.length ? explicitlyExcludedCustomers.join(', ') : 'None'}}
+      Customers skipped because not in allowlist: {${allowlistMissCustomers.length ? allowlistMissCustomers.join(', ') : 'None'}}
+      All skipped customers: {${skippedCustomers.length ? skippedCustomers.join(', ') : 'None'}}
       Errors: ${results.errors}
 
     `;
@@ -162,7 +176,7 @@ function buildSummaryEmailContent(results, fulcrumResults = null, { now = new Da
     results.details
       .filter(d => d.status === 'skipped')
       .forEach(d => {
-        body += `- Skipped invoice: ${d.invoiceId} for customer: ${d.customer} and was skipped because reason: ${d.reason}\n`;
+        body += `- Skipped invoice: ${d.invoiceId} for customer: ${d.customer} and was skipped because category: ${d.skipCategory || 'unknown'} and reason: ${d.reason}\n`;
       });
   }
 
@@ -179,6 +193,8 @@ function buildSummaryEmailContent(results, fulcrumResults = null, { now = new Da
     subject,
     body,
     skippedCustomers,
+    explicitlyExcludedCustomers,
+    allowlistMissCustomers,
     emailContext
   };
 }
@@ -628,8 +644,14 @@ const customerModule = {
     return customerMap;
   },
 
-  isExcludedCustomer(customerName) {
-    if (!customerName) return false;
+  getSkipPolicy(customerName) {
+    if (!customerName) {
+      return {
+        shouldSkip: true,
+        skipCategory: 'allowlist_miss',
+        reason: 'customer_name_missing'
+      };
+    }
     
     const lowerName = customerName.toLowerCase();
     const isExcluded = config.EXCLUDED_CUSTOMERS.some(excluded => 
@@ -642,9 +664,31 @@ const customerModule = {
     
     if (isExcluded) {
       console.log(`[Customer] Customer "${customerName}" matches exclusion list`);
+      return {
+        shouldSkip: true,
+        skipCategory: 'explicit_exclusion',
+        reason: `explicit_exclusion. The customer is: ${customerName}`
+      };
+    }
+
+    if (!isIncluded) {
+      console.log(`[Customer] Customer "${customerName}" is not in the allowlist`);
+      return {
+        shouldSkip: true,
+        skipCategory: 'allowlist_miss',
+        reason: `not_in_allowlist. The customer is: ${customerName}`
+      };
     }
     
-    return isExcluded || !isIncluded;
+    return {
+      shouldSkip: false,
+      skipCategory: null,
+      reason: null
+    };
+  },
+
+  isExcludedCustomer(customerName) {
+    return this.getSkipPolicy(customerName).shouldSkip;
   }
 };
 
@@ -1301,12 +1345,19 @@ const invoiceProcessor = {
         throw({message: `Customer ${customer.DisplayName} has no primary email defined`});
       }
 
-      // Exclusions
-      if (customerModule.isExcludedCustomer(customer.DisplayName)) {
-        console.log(`[Processor] ⚠️  Skipping invoice #${fullInvoice.DocNumber} - excluded customer`);
+      // Exclusions / allowlist misses
+      const skipPolicy = customerModule.getSkipPolicy(customer.DisplayName);
+      if (skipPolicy.shouldSkip) {
+        console.log(
+          `[Processor] ⚠️  Skipping invoice #${fullInvoice.DocNumber} - ` +
+          `${skipPolicy.skipCategory === 'explicit_exclusion' ? 'explicitly excluded customer' : 'customer not in allowlist'}`
+        );
         return { 
-            skipped: true, reason: `excluded_customer. The customer is: ${customer.DisplayName}`
-          , customer: customer.DisplayName, invoiceNumber: fullInvoice.DocNumber 
+            skipped: true,
+            reason: skipPolicy.reason,
+            skipCategory: skipPolicy.skipCategory,
+            customer: customer.DisplayName,
+            invoiceNumber: fullInvoice.DocNumber 
         };
       }
       
@@ -1468,6 +1519,7 @@ const app = {
               invoiceId: invoice.Id,
               status: 'skipped',
               reason: result.reason,
+              skipCategory: result.skipCategory,
               customer: result.customer
             });
           } else if (result.success) {
@@ -1498,7 +1550,7 @@ const app = {
       console.log('=====================================');
       console.log(`Total processed: ${results.processed}`);
       console.log(`✅ Successfully sent: ${results.sent}`);
-      console.log(`⚠️  Skipped (excluded): ${results.skipped}`);
+      console.log(`⚠️  Skipped (policy): ${results.skipped}`);
       console.log(`❌ Errors: ${results.errors}`);
       console.log(`Completed at: ${new Date().toISOString()}`);
       
