@@ -33,7 +33,7 @@ Parameters:
     Description: Public Chrome AWS Lambda layer for us-west-1 (includes Chromium + shared libs)
   LogRetentionInDays:
     Type: Number
-    Default: 30
+    Default: 90
     Description: Number of days to retain CloudWatch logs
 
 Resources:
