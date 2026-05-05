@@ -1,7 +1,8 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 
-import { buildSummaryEmailContent, customerModule, utils } from '../V2_emailSender.js';
+import { isCreateDetailTimeoutError } from '../fulcrumProcessor.js';
+import { buildFulcrumRunOptions, buildInvocationLockMetadata, buildSummaryEmailContent, customerModule, utils } from '../V2_emailSender.js';
 
 test('summary email separates explicit exclusions from allowlist misses', () => {
   const results = {
@@ -76,6 +77,92 @@ test('summary email separates explicit exclusions from allowlist misses', () => 
   assert.match(body, /Sendable customers considered: \{Johnson Controls Fire Protection LP\}/);
   assert.match(body, /Skipped invoice: F1001 for customer: SIEMENS CANADA LIMITED and was skipped because category: explicit_exclusion/);
   assert.match(body, /Skipped invoice: F1003 for customer: Summit Fire & Security and was skipped because category: allowlist_miss/);
+});
+
+test('summary email reports bounded Fulcrum processing', () => {
+  const results = {
+    processed: 0,
+    sent: 0,
+    skipped: 0,
+    errors: 0,
+    details: []
+  };
+  const fulcrumResults = {
+    processedInvoices: [],
+    errors: [],
+    stoppedEarly: true,
+    stopReason: 'reached Fulcrum action limit (25)'
+  };
+
+  const { body, emailContext } = buildSummaryEmailContent(results, fulcrumResults, {
+    now: new Date('2026-05-04T12:00:00.000Z'),
+    environmentLabel: 'PRODUCTION'
+  });
+
+  assert.match(body, /Fulcrum stopped early: reached Fulcrum action limit \(25\)/);
+  assert.equal(emailContext.fulcrum.stoppedEarly, true);
+  assert.equal(emailContext.fulcrum.stopReason, 'reached Fulcrum action limit (25)');
+});
+
+test('Fulcrum run options reserve Lambda time for QBO', () => {
+  const before = Date.now();
+  const options = buildFulcrumRunOptions(
+    {
+      fulcrumMaxActionAttempts: 10,
+      fulcrumStageBudgetMs: 480000,
+      qboStageReserveMs: 360000,
+      lambdaSafetyBufferMs: 15000
+    },
+    {
+      getRemainingTimeInMillis: () => 900000
+    }
+  );
+  const after = Date.now();
+
+  assert.equal(options.maxActionAttempts, 10);
+  assert.equal(options.maxPages, 20);
+  assert.equal(options.budgetMs, 480000);
+  assert.equal(options.qboReserveMs, 360000);
+  assert.equal(options.safetyBufferMs, 15000);
+  assert.ok(options.stopAtEpochMs >= before + 480000);
+  assert.ok(options.stopAtEpochMs <= after + 480000);
+});
+
+test('invocation lock metadata expires after remaining runtime plus buffer', () => {
+  const metadata = buildInvocationLockMetadata(
+    {
+      awsRequestId: 'req-123',
+      getRemainingTimeInMillis: () => 120000
+    },
+    {
+      nowMs: 1_700_000_000_000,
+      tableName: 'InvoiceLocks',
+      lockName: 'invoice-run'
+    }
+  );
+
+  assert.deepEqual(metadata, {
+    tableName: 'InvoiceLocks',
+    lockName: 'invoice-run',
+    ownerId: 'req-123',
+    acquiredAtEpochSeconds: 1_700_000_000,
+    expiresAtEpochSeconds: 1_700_000_180
+  });
+});
+
+test('Fulcrum create timeout detection matches timeout-style errors only', () => {
+  assert.equal(
+    isCreateDetailTimeoutError(new Error('Navigation timeout of 35000 ms exceeded')),
+    true
+  );
+  assert.equal(
+    isCreateDetailTimeoutError(new Error('Waiting failed: 30000ms exceeded')),
+    true
+  );
+  assert.equal(
+    isCreateDetailTimeoutError(new Error('Create button not found')),
+    false
+  );
 });
 
 test('customer skip policy distinguishes explicit exclusions from allowlist misses', () => {

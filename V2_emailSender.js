@@ -19,9 +19,12 @@ import { runFulcrumProcessor } from './fulcrumProcessor.js';
 // Add these imports at the top of your main file
 import { SSMClient, GetParameterCommand, PutParameterCommand } from "@aws-sdk/client-ssm";
 import { SESClient, SendEmailCommand } from "@aws-sdk/client-ses";
+import { DynamoDBClient, PutItemCommand, DeleteItemCommand } from "@aws-sdk/client-dynamodb";
 
 const ssmClient = new SSMClient({ region: process.env.AWS_REGION || 'us-west-1' });
 const sesClient = new SESClient({ region: process.env.AWS_REGION || 'us-west-1' });
+const dynamoDbClient = new DynamoDBClient({ region: process.env.AWS_REGION || 'us-west-1' });
+const DEFAULT_INVOCATION_LOCK_NAME = 'rsg-invoice-processor';
 
 // ===========================
 // Configuration Module
@@ -124,7 +127,9 @@ function buildSummaryEmailContent(results, fulcrumResults = null, { now = new Da
     },
     fulcrum: fulcrumResults ? {
       processed: fulcrumResults.processedInvoices?.length ?? 0,
-      errors: fulcrumResults.errors?.length ?? 0
+      errors: fulcrumResults.errors?.length ?? 0,
+      stoppedEarly: !!fulcrumResults.stoppedEarly,
+      stopReason: fulcrumResults.stopReason || null
     } : null
   };
 
@@ -135,6 +140,7 @@ function buildSummaryEmailContent(results, fulcrumResults = null, { now = new Da
         ========================
         ${fulcrumResults.processedInvoices.length} invoices processed
         ${fulcrumResults.errors.length} errors
+        ${fulcrumResults.stoppedEarly ? `Fulcrum stopped early: ${fulcrumResults.stopReason}` : 'Fulcrum completed all available pages'}
         The errors are: ${fulcrumResults.errors}
         
       `;
@@ -1711,7 +1717,9 @@ export {
   utils,
   externalDataModule,
   invoiceProcessor,
-  buildSummaryEmailContent
+  buildSummaryEmailContent,
+  buildFulcrumRunOptions,
+  buildInvocationLockMetadata
 };
 
 // ---- utils: dates (add once) ----
@@ -1816,12 +1824,154 @@ function setPoCustomFieldIfBlank(fullInvoice, poValue, fieldsToUpdate) {
   }
 }
 
+function parsePositiveIntegerOption(value, fallback) {
+  if (value === undefined || value === null || value === '') return fallback;
+  const parsed = Number(value);
+  return Number.isFinite(parsed) && parsed > 0 ? Math.floor(parsed) : fallback;
+}
+
+function buildFulcrumRunOptions(event = {}, context = null) {
+  const maxActionAttempts = parsePositiveIntegerOption(
+    event?.fulcrumMaxActionAttempts ??
+      event?.fulcrumMaxProcessedInvoices ??
+      process.env.FULCRUM_MAX_ACTIONS ??
+      process.env.FULCRUM_MAX_PROCESSED_INVOICES,
+    25
+  );
+  const maxPages = parsePositiveIntegerOption(event?.fulcrumMaxPages ?? process.env.FULCRUM_MAX_PAGES, 20);
+  const requestedBudgetMs = parsePositiveIntegerOption(event?.fulcrumStageBudgetMs ?? process.env.FULCRUM_STAGE_BUDGET_MS, 480000);
+  const qboReserveMs = parsePositiveIntegerOption(event?.qboStageReserveMs ?? process.env.QBO_STAGE_RESERVE_MS, 360000);
+  const safetyBufferMs = parsePositiveIntegerOption(event?.lambdaSafetyBufferMs ?? process.env.LAMBDA_SAFETY_BUFFER_MS, 15000);
+  const remainingMs = typeof context?.getRemainingTimeInMillis === 'function'
+    ? context.getRemainingTimeInMillis()
+    : null;
+  const budgetMs = remainingMs
+    ? Math.max(30000, Math.min(requestedBudgetMs, Math.max(0, remainingMs - qboReserveMs - safetyBufferMs)))
+    : requestedBudgetMs;
+
+  return {
+    maxActionAttempts,
+    maxPages,
+    stopAtEpochMs: Date.now() + budgetMs,
+    budgetMs,
+    qboReserveMs,
+    safetyBufferMs,
+    lambdaRemainingMsAtStart: remainingMs
+  };
+}
+
+function buildInvocationLockMetadata(context = null, {
+  nowMs = Date.now(),
+  remainingMs = typeof context?.getRemainingTimeInMillis === 'function'
+    ? context.getRemainingTimeInMillis()
+    : 900000,
+  tableName = process.env.INVOICE_PROCESSOR_LOCK_TABLE || '',
+  lockName = process.env.INVOICE_PROCESSOR_LOCK_NAME || DEFAULT_INVOCATION_LOCK_NAME
+} = {}) {
+  const effectiveRemainingMs = Number.isFinite(remainingMs) && remainingMs > 0 ? remainingMs : 900000;
+  const acquiredAtEpochSeconds = Math.floor(nowMs / 1000);
+  const expiresAtEpochSeconds = Math.ceil((nowMs + effectiveRemainingMs + 60000) / 1000);
+
+  return {
+    tableName,
+    lockName,
+    ownerId: context?.awsRequestId || `local-${acquiredAtEpochSeconds}`,
+    acquiredAtEpochSeconds,
+    expiresAtEpochSeconds
+  };
+}
+
+async function acquireInvocationLock(context = null) {
+  const lock = buildInvocationLockMetadata(context);
+
+  if (!lock.tableName) {
+    console.warn('[Lock] INVOICE_PROCESSOR_LOCK_TABLE is not configured; continuing without a single-run guard');
+    return null;
+  }
+
+  try {
+    await dynamoDbClient.send(new PutItemCommand({
+      TableName: lock.tableName,
+      Item: {
+        LockName: { S: lock.lockName },
+        OwnerId: { S: lock.ownerId },
+        AcquiredAt: { N: String(lock.acquiredAtEpochSeconds) },
+        ExpiresAt: { N: String(lock.expiresAtEpochSeconds) }
+      },
+      ConditionExpression: 'attribute_not_exists(LockName) OR ExpiresAt < :now',
+      ExpressionAttributeValues: {
+        ':now': { N: String(lock.acquiredAtEpochSeconds) }
+      }
+    }));
+
+    console.log('[Lock] Acquired invocation lock:', JSON.stringify({
+      tableName: lock.tableName,
+      lockName: lock.lockName,
+      ownerId: lock.ownerId,
+      expiresAtEpochSeconds: lock.expiresAtEpochSeconds
+    }));
+    return lock;
+  } catch (error) {
+    if (error?.name === 'ConditionalCheckFailedException') {
+      console.warn('[Lock] Another invocation already holds the lock:', JSON.stringify({
+        tableName: lock.tableName,
+        lockName: lock.lockName
+      }));
+      return { ...lock, acquired: false };
+    }
+
+    throw error;
+  }
+}
+
+async function releaseInvocationLock(lock) {
+  if (!lock?.tableName || !lock?.ownerId || lock?.acquired === false) {
+    return;
+  }
+
+  try {
+    await dynamoDbClient.send(new DeleteItemCommand({
+      TableName: lock.tableName,
+      Key: {
+        LockName: { S: lock.lockName }
+      },
+      ConditionExpression: 'OwnerId = :ownerId',
+      ExpressionAttributeValues: {
+        ':ownerId': { S: lock.ownerId }
+      }
+    }));
+    console.log('[Lock] Released invocation lock:', JSON.stringify({
+      tableName: lock.tableName,
+      lockName: lock.lockName,
+      ownerId: lock.ownerId
+    }));
+  } catch (error) {
+    if (error?.name === 'ConditionalCheckFailedException') {
+      console.warn('[Lock] Lock owner changed before release; leaving current record untouched');
+      return;
+    }
+
+    console.error('[Lock] Failed to release invocation lock:', error);
+  }
+}
+
 // Lambda handler
 export const handler = async (event, context) => {
   console.log('[Lambda] Starting invoice processing...');
   
   let qboResults;
   let fulcrumResults = null;
+  const invocationLock = await acquireInvocationLock(context);
+
+  if (invocationLock?.acquired === false) {
+    return {
+      statusCode: 409,
+      body: JSON.stringify({
+        message: 'Invoice processing skipped because another invocation is already running',
+        lockName: invocationLock.lockName
+      })
+    };
+  }
   
   try {
     // =====================================
@@ -1837,10 +1987,13 @@ export const handler = async (event, context) => {
       console.warn('[Fulcrum] Pass credentials in event: { fulcrumUsername, fulcrumPassword }');
     } else {
       try {
+        const fulcrumRunOptions = buildFulcrumRunOptions(event, context);
+        console.log('[Fulcrum] Run options:', JSON.stringify(fulcrumRunOptions));
         fulcrumResults = await runFulcrumProcessor(
           fulcrumUsername,
           fulcrumPassword,
-          true // headless mode for Lambda
+          true, // headless mode for Lambda
+          fulcrumRunOptions
         );
         
         console.log(`\n[Fulcrum] Completed - ${fulcrumResults.processedInvoices.length} processed, ${fulcrumResults.errors.length} errors\n`);
@@ -1875,7 +2028,11 @@ export const handler = async (event, context) => {
         fulcrum: fulcrumResults ? {
           processed: fulcrumResults.processedInvoices.length,
           errors: fulcrumResults.errors.length,
-          success: fulcrumResults.success
+          success: fulcrumResults.success,
+          complete: fulcrumResults.complete,
+          stoppedEarly: fulcrumResults.stoppedEarly,
+          stopReason: fulcrumResults.stopReason,
+          actionAttempts: fulcrumResults.actionAttempts
         } : { skipped: true },
         qbo: {
           processed: qboResults.processed,
@@ -1912,5 +2069,7 @@ export const handler = async (event, context) => {
     }
 
     throw error;
+  } finally {
+    await releaseInvocationLock(invocationLock);
   }
 };

@@ -19,6 +19,7 @@
     "logs": "aws logs tail /aws/lambda/RSGInvoiceProcessor --region us-west-1 --follow --since 1h"
   },
   "dependencies": {
+    "@aws-sdk/client-dynamodb": "^3.470.0",
     "@aws-sdk/client-ssm": "^3.470.0",
     "@aws-sdk/client-ses": "^3.470.0",
     "@sparticuz/chromium": "^143.0.4",

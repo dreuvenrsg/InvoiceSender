@@ -13,6 +13,8 @@ Globals:
         FROM_EMAIL: !Ref FromEmail
         TO_EMAILS: !Ref ToEmails
         deploy_region: !Ref DeployRegion   # ← your custom var stays
+        INVOICE_PROCESSOR_LOCK_TABLE: !Ref InvoiceProcessorLockTable
+        INVOICE_PROCESSOR_LOCK_NAME: rsg-invoice-processor
     EphemeralStorage:
       Size: 2048
 
@@ -37,6 +39,21 @@ Parameters:
     Description: Number of days to retain CloudWatch logs
 
 Resources:
+  InvoiceProcessorLockTable:
+    Type: AWS::DynamoDB::Table
+    Properties:
+      TableName: RSGInvoiceProcessorLocks
+      BillingMode: PAY_PER_REQUEST
+      AttributeDefinitions:
+        - AttributeName: LockName
+          AttributeType: S
+      KeySchema:
+        - AttributeName: LockName
+          KeyType: HASH
+      TimeToLiveSpecification:
+        AttributeName: ExpiresAt
+        Enabled: true
+
   # CloudWatch Logs Group
   InvoiceProcessorLogGroup:
     Type: AWS::Logs::LogGroup
@@ -67,6 +84,11 @@ Resources:
             - Effect: Allow
               Action: ses:SendEmail
               Resource: "*"
+            - Effect: Allow
+              Action:
+                - dynamodb:PutItem
+                - dynamodb:DeleteItem
+              Resource: !GetAtt InvoiceProcessorLockTable.Arn
             - Effect: Allow
               Action:
                 - logs:CreateLogStream
