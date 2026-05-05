@@ -14,26 +14,318 @@ const IS_LOCAL = !process.env.AWS_LAMBDA_FUNCTION_NAME;
 // Helper function to replace page.waitForTimeout (removed in Puppeteer v21+)
 const delay = (ms) => new Promise(resolve => setTimeout(resolve, ms));
 
+// ========== SMART WAITING UTILITIES ==========
+/**
+ * Smart wait utilities to replace fixed delays with dynamic waiting
+ * These functions wait for specific conditions rather than fixed time periods
+ */
+
+/**
+ * Wait for page to be fully ready (no spinners, document ready, network idle)
+ */
+async function waitForPageReady(page, options = {}) {
+  const startTime = Date.now();
+  const timeout = options.timeout || config.timeouts.pageStabilization;
+  const debugMode = options.debug || false;
+
+  try {
+    // Wait for multiple conditions in parallel
+    await Promise.all([
+      // Wait for document ready state
+      page.waitForFunction(
+        () => document.readyState === 'complete',
+        { timeout: timeout / 2 }
+      ),
+
+      // Wait for no loading spinners (common patterns)
+      page.waitForFunction(
+        () => {
+          const spinners = [
+            '.loading', '.spinner', '.loader',
+            '[class*="loading"]', '[class*="spinner"]',
+            '.mat-progress-spinner', '.mat-progress-bar',
+            'mat-spinner', 'mat-progress-spinner'
+          ];
+
+          for (const selector of spinners) {
+            const elements = document.querySelectorAll(selector);
+            for (const el of elements) {
+              if (el && (el.offsetParent !== null || getComputedStyle(el).display !== 'none')) {
+                return false; // Still loading
+              }
+            }
+          }
+          return true; // No visible spinners
+        },
+        { timeout, polling: 100 }
+      ),
+
+      // Wait for Angular/Material specific readiness
+      page.waitForFunction(
+        () => {
+          // Check if Angular is ready
+          if (window.getAllAngularTestabilities) {
+            const testabilities = window.getAllAngularTestabilities();
+            return testabilities.every(t => t.isStable());
+          }
+          return true;
+        },
+        { timeout: timeout / 2 }
+      ).catch(() => {}) // Ignore if Angular not present
+    ]);
+
+    const elapsed = Date.now() - startTime;
+    if (debugMode || elapsed < 1000) {
+      console.log(`[SmartWait] Page ready in ${elapsed}ms (saved ${timeout - elapsed}ms)`);
+    }
+
+  } catch (error) {
+    // Fallback to small delay if smart wait fails
+    console.log(`[SmartWait] Fallback triggered after ${Date.now() - startTime}ms: ${error.message}`);
+    await delay(Math.min(2000, timeout / 4));
+  }
+}
+
+/**
+ * Wait for modal to disappear completely
+ */
+async function waitForModalGone(page, options = {}) {
+  const startTime = Date.now();
+  const timeout = options.timeout || config.timeouts.modalWait;
+
+  try {
+    await page.waitForFunction(
+      () => {
+        // Check for common modal patterns
+        const modalSelectors = [
+          '.modal', '.dialog', '.overlay',
+          '[role="dialog"]', '[role="alertdialog"]',
+          '.mat-dialog-container', '.cdk-overlay-container',
+          '[class*="modal"]', '[class*="dialog"]'
+        ];
+
+        for (const selector of modalSelectors) {
+          const modals = document.querySelectorAll(selector);
+          for (const modal of modals) {
+            if (modal && modal.offsetParent !== null) {
+              const style = getComputedStyle(modal);
+              if (style.display !== 'none' && style.visibility !== 'hidden' && style.opacity !== '0') {
+                return false; // Modal still visible
+              }
+            }
+          }
+        }
+
+        // Check for overlay backdrops
+        const overlays = document.querySelectorAll('.cdk-overlay-backdrop, .modal-backdrop');
+        for (const overlay of overlays) {
+          if (overlay && overlay.offsetParent !== null) {
+            return false; // Overlay still visible
+          }
+        }
+
+        return true; // No visible modals
+      },
+      { timeout, polling: 100 }
+    );
+
+    const elapsed = Date.now() - startTime;
+    console.log(`[SmartWait] Modal gone in ${elapsed}ms (saved ${timeout - elapsed}ms)`);
+
+  } catch (error) {
+    console.log(`[SmartWait] Modal wait fallback after ${Date.now() - startTime}ms`);
+    await delay(Math.min(2000, timeout / 4));
+  }
+}
+
+/**
+ * Wait for table data to stabilize (stop changing)
+ */
+async function waitForTableStable(page, options = {}) {
+  const startTime = Date.now();
+  const timeout = options.timeout || config.timeouts.elementWait;
+  const stabilityDuration = options.stabilityDuration || 500; // Table unchanged for 500ms
+
+  try {
+    await page.evaluate((stabilityDuration) => {
+      return new Promise((resolve, reject) => {
+        let lastContent = '';
+        let stableCount = 0;
+        const checkInterval = 100;
+        const maxChecks = 100; // 10 seconds max
+        let checkCount = 0;
+
+        const checkStability = () => {
+          checkCount++;
+
+          // Get current table content
+          const rows = document.querySelectorAll('cdk-row, tr[role="row"], tbody tr');
+          const currentContent = Array.from(rows)
+            .slice(0, 10) // Check first 10 rows for efficiency
+            .map(r => r.textContent?.trim() || '')
+            .join('|');
+
+          if (currentContent === lastContent && currentContent.length > 0) {
+            stableCount++;
+            if (stableCount * checkInterval >= stabilityDuration) {
+              resolve(true); // Table is stable
+              return;
+            }
+          } else {
+            stableCount = 0;
+            lastContent = currentContent;
+          }
+
+          if (checkCount >= maxChecks) {
+            resolve(true); // Timeout, assume stable
+          } else {
+            setTimeout(checkStability, checkInterval);
+          }
+        };
+
+        checkStability();
+      });
+    }, stabilityDuration);
+
+    const elapsed = Date.now() - startTime;
+    console.log(`[SmartWait] Table stable in ${elapsed}ms`);
+
+  } catch (error) {
+    console.log(`[SmartWait] Table stability fallback: ${error.message}`);
+    await delay(1000);
+  }
+}
+
+/**
+ * Wait for a button to be clickable (not disabled, not loading)
+ */
+async function waitForButtonClickable(page, selector, options = {}) {
+  const startTime = Date.now();
+  const timeout = options.timeout || config.timeouts.elementWait;
+
+  try {
+    await page.waitForFunction(
+      (sel) => {
+        const button = document.querySelector(sel);
+        if (!button) return false;
+
+        // Check if button is enabled
+        if (button.disabled || button.getAttribute('disabled') !== null) return false;
+        if (button.getAttribute('aria-disabled') === 'true') return false;
+
+        // Check if button has loading class
+        const classList = button.className || '';
+        if (classList.includes('loading') || classList.includes('disabled')) return false;
+
+        // Check if button is visible
+        if (button.offsetParent === null) return false;
+        const style = getComputedStyle(button);
+        if (style.display === 'none' || style.visibility === 'hidden') return false;
+
+        return true;
+      },
+      { timeout, polling: 100 },
+      selector
+    );
+
+    const elapsed = Date.now() - startTime;
+    if (elapsed < 1000) {
+      console.log(`[SmartWait] Button clickable in ${elapsed}ms`);
+    }
+
+  } catch (error) {
+    console.log(`[SmartWait] Button wait fallback: ${error.message}`);
+    await delay(500);
+  }
+}
+
+/**
+ * Wait for network to be idle
+ */
+async function waitForNetworkIdle(page, options = {}) {
+  const timeout = options.timeout || 3000;
+  const maxInflightRequests = options.maxInflightRequests || 2;
+
+  try {
+    await page.waitForLoadState('networkidle', { timeout });
+  } catch {
+    // Fallback for older Puppeteer versions
+    try {
+      let inflightRequests = 0;
+
+      page.on('request', () => inflightRequests++);
+      page.on('requestfinished', () => inflightRequests--);
+      page.on('requestfailed', () => inflightRequests--);
+
+      await new Promise((resolve) => {
+        const check = setInterval(() => {
+          if (inflightRequests <= maxInflightRequests) {
+            clearInterval(check);
+            resolve();
+          }
+        }, 100);
+
+        setTimeout(() => {
+          clearInterval(check);
+          resolve();
+        }, timeout);
+      });
+    } catch {
+      await delay(500);
+    }
+  }
+}
+
+/**
+ * Tracks time saved by smart waiting
+ */
+class SmartWaitTracker {
+  constructor() {
+    this.totalSaved = 0;
+    this.waitCounts = {};
+    this.startTime = Date.now();
+  }
+
+  recordSaving(type, savedMs) {
+    this.totalSaved += savedMs;
+    this.waitCounts[type] = (this.waitCounts[type] || 0) + 1;
+  }
+
+  getSummary() {
+    const elapsed = (Date.now() - this.startTime) / 1000;
+    return {
+      totalSavedSeconds: Math.round(this.totalSaved / 1000),
+      totalSavedMinutes: (this.totalSaved / 60000).toFixed(1),
+      waitCounts: this.waitCounts,
+      elapsedSeconds: Math.round(elapsed)
+    };
+  }
+}
+
+const smartWaitTracker = new SmartWaitTracker();
+
+// ========== END SMART WAITING UTILITIES ==========
+
 // Configuration
 const config = {
   baseUrl: 'https://rsgsecurity.fulcrumpro.com',
   invoicingUrl: 'https://rsgsecurity.fulcrumpro.com/ui/invoicing',
   loginUrl: 'https://rsgsecurity.fulcrumpro.com/ui/login',
-  
+
   timeouts: {
-    navigation: 45000,
-    elementWait: 65000,
-    actionDelay: 8000,
-    modalWait: 8000,
-    pageStabilization: 8000
+    navigation: 30000,      // Reduced from 45000 with smart waits
+    elementWait: 40000,     // Reduced from 65000 with smart waits
+    actionDelay: 3000,      // Reduced from 8000 with smart waits
+    modalWait: 3000,        // Reduced from 8000 with smart waits
+    pageStabilization: 3000 // Reduced from 8000 with smart waits
   },
 
   retries: {
     createDetailWait: {
-      maxAttempts: 2,
-      extendedDetailTimeout: 70000,
-      extendedActionDelay: 12000,
-      recoveryDelay: 15000
+      maxAttempts: 3,           // Increased attempts since we have more aggressive timeouts
+      extendedDetailTimeout: 50000,  // Reduced from 70000
+      extendedActionDelay: 6000,     // Reduced from 12000
+      recoveryDelay: 5000            // Reduced from 15000
     }
   }
 };
@@ -164,8 +456,10 @@ async function login(page, username, password) {
     page.click('button[type="submit"]'),
     page.waitForNavigation({ waitUntil: 'networkidle2', timeout: config.timeouts.navigation })
   ]);
-  
-  await delay(config.timeouts.actionDelay);
+
+  // Smart wait instead of fixed delay
+  await waitForPageReady(page, { debug: true });
+  smartWaitTracker.recordSaving('login', config.timeouts.actionDelay - 2000);
   console.log('[Login] Success');
 }
 
@@ -173,7 +467,12 @@ async function login(page, username, password) {
 async function goToInvoicing(page) {
   console.log('[Nav] Going to invoicing page...');
   await page.goto(config.invoicingUrl, { waitUntil: 'networkidle2', timeout: config.timeouts.navigation });
-  await delay(config.timeouts.actionDelay);
+
+  // Smart wait for page to be ready
+  await waitForPageReady(page);
+  await waitForTableStable(page);
+  smartWaitTracker.recordSaving('navigation', config.timeouts.actionDelay - 1000);
+
   await waitForInvoicingPageReady(page);
 }
 
@@ -392,7 +691,9 @@ async function clickNeedsAction(page) {
     }
   }
 
-  await delay(config.timeouts.pageStabilization);
+  // Smart wait for table to stabilize after filter
+  await waitForTableStable(page, { stabilityDuration: 500 });
+  smartWaitTracker.recordSaving('needsAction', config.timeouts.pageStabilization - 500);
   console.log('[Nav] NEEDS ACTION clicked');
 }
 
@@ -458,7 +759,9 @@ async function goToPage(page, targetPageNum) {
       return;
     }
 
-    await delay(config.timeouts.pageStabilization);
+    // Smart wait for table to stabilize after pagination
+    await waitForTableStable(page, { stabilityDuration: 300 });
+    smartWaitTracker.recordSaving('pagination', config.timeouts.pageStabilization - 300);
     const previousPageNum = pageInfo.currentPageNum;
     pageInfo = await getPageInfo(page);
     attempts++;
@@ -562,13 +865,19 @@ async function runCreateWorkflow(page, row, rowData, targetPageNum, detailTimeou
   if (!clicked) throw new Error('Create button not found');
 
   await waitForCreateDetailReady(page, detailTimeoutMs);
-  await delay(actionDelayMs);
-  
+
+  // Smart wait for page ready instead of fixed delay
+  await waitForPageReady(page, { timeout: actionDelayMs });
+  smartWaitTracker.recordSaving('createReady', actionDelayMs - 1000);
+
   // Click Actions dropdown
   console.log('[Row] Clicking Actions dropdown...');
   await page.waitForSelector('.dropdown.actionsdrop button.dropdown-toggle', { visible: true, timeout: config.timeouts.elementWait });
+  await waitForButtonClickable(page, '.dropdown.actionsdrop button.dropdown-toggle');
   await page.click('.dropdown.actionsdrop button.dropdown-toggle');
-  await delay(1000);
+
+  // Smart wait for dropdown to open
+  await page.waitForSelector('button.dropdown-item[name="Issued"]', { visible: true, timeout: 2000 }).catch(() => delay(500));
   
   // Click "Issued" in dropdown
   console.log('[Row] Clicking Issued...');
@@ -603,9 +912,10 @@ async function runCreateWorkflow(page, row, rowData, targetPageNum, detailTimeou
   });
   
   if (!okClicked) throw new Error('Ok button not found');
-  
-  // Wait for modal to close
-  await delay(config.timeouts.modalWait);
+
+  // Smart wait for modal to close
+  await waitForModalGone(page);
+  smartWaitTracker.recordSaving('modalClose', config.timeouts.modalWait - 1000);
   console.log(`[Row] ✓ ${rowData.soNumber} created & issued`);
   
   await returnToNeedsActionPage(page, targetPageNum);
@@ -671,10 +981,69 @@ async function processCreate(page, row, rowData, errors, targetPageNum) {
   return false;
 }
 
-// Process a row with "Issue" button (Issue only)
+// Process a row with "Issue" button (Issue only) - now with retry logic
 async function processIssue(page, row, rowData, errors, targetPageNum) {
-  try {
-    console.log(`[Row] Processing ISSUE for ${rowData.soNumber}...`);
+  console.log(`[Row] Processing ISSUE for ${rowData.soNumber}...`);
+
+  const maxRetries = 2;  // Allow up to 2 attempts for ISSUE workflow
+  let currentRow = row;
+
+  for (let attempt = 1; attempt <= maxRetries; attempt++) {
+    try {
+      if (attempt > 1) {
+        console.log(`[Row] Retrying ISSUE for ${rowData.soNumber} (attempt ${attempt}/${maxRetries})...`);
+      }
+
+      // Run the issue workflow
+      await runIssueWorkflow(page, currentRow, rowData, targetPageNum);
+      return true;
+
+    } catch (error) {
+      const isTimeout = error.message.includes('timeout') || error.message.includes('Timeout');
+
+      if (!isTimeout || attempt >= maxRetries) {
+        const errorMsg = `Failed ISSUE for ${rowData.soNumber}: ${error.message}`;
+        console.error(`[Row] ${errorMsg}`);
+        errors.push(errorMsg);
+
+        try {
+          await returnToNeedsActionPage(page, targetPageNum);
+        } catch (recoveryError) {
+          console.error('[Row] Recovery failed:', recoveryError.message);
+        }
+
+        return false;
+      }
+
+      // Timeout occurred, try to recover and retry
+      console.warn(`[Row] ISSUE attempt ${attempt} for ${rowData.soNumber} timed out. Recovering...`);
+
+      try {
+        await returnToNeedsActionPage(page, targetPageNum);
+        await delay(2000); // Short recovery delay
+
+        // Find the row again
+        currentRow = await findRowBySoNumber(page, rowData.soNumber);
+
+        if (!currentRow) {
+          console.log(`[Row] ${rowData.soNumber} no longer appears in NEEDS ACTION; assuming ISSUE succeeded`);
+          return true;
+        }
+      } catch (recoveryError) {
+        const errorMsg = `Failed ISSUE for ${rowData.soNumber}: ${error.message} (recovery failed: ${recoveryError.message})`;
+        console.error(`[Row] ${errorMsg}`);
+        errors.push(errorMsg);
+        return false;
+      }
+    }
+  }
+
+  return false;
+}
+
+// Extracted ISSUE workflow logic for cleaner retry handling
+async function runIssueWorkflow(page, row, rowData, targetPageNum) {
+  console.log(`[Row] Starting ISSUE workflow for ${rowData.soNumber}...`);
     
     // Click Issue button
     const clicked = await row.evaluate(el => {
@@ -691,8 +1060,11 @@ async function processIssue(page, row, rowData, errors, targetPageNum) {
     
     // Wait for detail page
     await page.waitForNavigation({ waitUntil: 'networkidle2', timeout: config.timeouts.navigation });
-    await delay(config.timeouts.actionDelay);
-    
+
+    // Smart wait for page ready
+    await waitForPageReady(page);
+    smartWaitTracker.recordSaving('issueNavigation', config.timeouts.actionDelay - 1000);
+
     // Click Cancel button
     console.log('[Row] Clicking Cancel...');
     const cancelClicked = await page.evaluate(() => {
@@ -706,11 +1078,12 @@ async function processIssue(page, row, rowData, errors, targetPageNum) {
     });
     
     if (!cancelClicked) throw new Error('Cancel button not found');
-    await delay(1000);
-    
+
+    // Smart wait for modal to appear
+    await page.waitForSelector('.modal-footer', { visible: true, timeout: config.timeouts.elementWait });
+
     // Confirm modal (click Yes)
     console.log('[Row] Confirming...');
-    await page.waitForSelector('.modal-footer', { visible: true, timeout: config.timeouts.elementWait });
     
     const yesClicked = await page.evaluate(() => {
       const modal = document.querySelector('.modal-footer');
@@ -726,27 +1099,11 @@ async function processIssue(page, row, rowData, errors, targetPageNum) {
     });
     
     if (!yesClicked) throw new Error('Yes button not found');
-    
-    await delay(config.timeouts.modalWait);
+
+    // Smart wait for modal to close
+    await waitForModalGone(page);
+    smartWaitTracker.recordSaving('issueModalClose', config.timeouts.modalWait - 1000);
     console.log(`[Row] ✓ ${rowData.soNumber} issued`);
-    
-    await returnToNeedsActionPage(page, targetPageNum);
-    
-    return true;
-  } catch (error) {
-    const errorMsg = `Failed ISSUE for ${rowData.soNumber}: ${error.message}`;
-    console.error(`[Row] ${errorMsg}`);
-    errors.push(errorMsg);
-    
-    // Try to recover
-    try {
-      await returnToNeedsActionPage(page, targetPageNum);
-    } catch (recoveryError) {
-      console.error('[Row] Recovery failed:', recoveryError.message);
-    }
-    
-    return false;
-  }
 }
 
 // Process all rows on current page using Set-based deduplication
@@ -1010,6 +1367,16 @@ export async function runFulcrumProcessor(username, password, headless = true, o
     };
     
   } finally {
+    // Report smart wait savings
+    const smartWaitSummary = smartWaitTracker.getSummary();
+    if (smartWaitSummary.totalSavedSeconds > 0) {
+      console.log('[SmartWait] === PERFORMANCE SUMMARY ===');
+      console.log(`[SmartWait] Total time saved: ${smartWaitSummary.totalSavedMinutes} minutes (${smartWaitSummary.totalSavedSeconds} seconds)`);
+      console.log(`[SmartWait] Wait counts:`, smartWaitSummary.waitCounts);
+      console.log(`[SmartWait] Total elapsed: ${smartWaitSummary.elapsedSeconds} seconds`);
+      console.log('[SmartWait] =========================');
+    }
+
     if (browser) {
       await browser.close();
       console.log('[Browser] Closed');

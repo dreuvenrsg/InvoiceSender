@@ -1,0 +1,822 @@
+[Local] Running in local mode...
+
+🤖 Running Fulcrum processor (visible browser)...
+
+
+=== FULCRUM INVOICE PROCESSOR ===
+
+[Config] Fulcrum processing limits: {"maxPages":20,"maxActionAttempts":null,"stopAtEpochMs":null}
+[Browser] Initializing...
+[Env] AWS_LAMBDA_FUNCTION_NAME: (local)
+[Env] NODE_VERSION: v22.22.0
+[Browser] Ready
+[Login] Logging in...
+[SmartWait] Page ready in 812ms (saved 2188ms)
+[Login] Success
+[Nav] Going to invoicing page...
+[SmartWait] Page ready in 107ms (saved 2893ms)
+[SmartWait] Table stable in 509ms
+[Nav] Ensuring NEEDS ACTION filter is active...
+[Nav] NEEDS ACTION not active, clicking: {"isActive":false,"classSelected":false,"visuallySelected":false,"rowsLookFiltered":false,"rowCount":25,"needsActionText":"NEEDS ACTION -$7,066 35","needsActionClass":"clearButtonStyles kpi-card","selectedVisualTag":null,"selectedVisualClass":null,"selectedVisualBackground":null}
+[Nav] NEEDS ACTION filter verified: {"isActive":true,"classSelected":false,"visuallySelected":false,"rowsLookFiltered":true,"rowCount":25,"needsActionText":"NEEDS ACTION -$7,066 35","needsActionClass":"clearButtonStyles kpi-card","selectedVisualTag":null,"selectedVisualClass":null,"selectedVisualBackground":null}
+[SmartWait] Table stable in 509ms
+[Nav] NEEDS ACTION clicked
+
+[Main] Processing page 1...
+
+[Process] Processing current page...
+[Process] Found 25 rows on page
+[Process] Row 1: SO7013, $0 / $0, Refund=true
+[Process] Skipping SO7013 - validation failed
+[Process] Row 2: SO5197, $0 / $0, Refund=true
+[Process] Skipping SO5197 - validation failed
+[Process] Row 3: SO5388, $0 / $0, Refund=true
+[Process] Skipping SO5388 - validation failed
+[Process] Row 4: SO3449, $0 / $0, Refund=true
+[Process] Skipping SO3449 - validation failed
+[Process] Row 5: SO6153, $0 / $0, Refund=true
+[Process] Skipping SO6153 - validation failed
+[Process] Row 6: SO7551, $0 / $1854.4, Refund=false
+[Process] Skipping SO7551 - validation failed
+[Process] Row 7: SO6220, $0 / $0, Refund=true
+[Process] Skipping SO6220 - validation failed
+[Process] Row 8: SO1109, $0 / $0, Refund=false
+[Process] Skipping SO1109 - validation failed
+[Process] Row 9: SO2725, $0 / $0, Refund=false
+[Process] Skipping SO2725 - validation failed
+[Process] Row 10: SO2502, $0 / $0, Refund=true
+[Process] Skipping SO2502 - validation failed
+[Process] Row 11: SO1941, $0 / $0, Refund=true
+[Process] Skipping SO1941 - validation failed
+[Process] Row 12: SO3158, $0 / $0, Refund=false
+[Process] Skipping SO3158 - validation failed
+[Process] Row 13: SO3018, $0 / $0, Refund=false
+[Process] Skipping SO3018 - validation failed
+[Process] Row 14: SO3813, $0 / $0, Refund=true
+[Process] Skipping SO3813 - validation failed
+[Process] Row 15: SO1866, $0 / $0, Refund=false
+[Process] Skipping SO1866 - validation failed
+[Process] Row 16: SO6999, $0 / $0, Refund=true
+[Process] Skipping SO6999 - validation failed
+[Process] Row 17: SO5469, $0 / $0, Refund=true
+[Process] Skipping SO5469 - validation failed
+[Process] Row 18: SO6923, $0 / $0, Refund=true
+[Process] Skipping SO6923 - validation failed
+[Process] Row 19: SO4546, $0 / $0, Refund=true
+[Process] Skipping SO4546 - validation failed
+[Process] Row 20: SO6687, $0 / $0, Refund=true
+[Process] Skipping SO6687 - validation failed
+[Process] Row 21: SO2349, $0 / $0, Refund=true
+[Process] Skipping SO2349 - validation failed
+[Process] Row 22: SO6611, $0 / $0, Refund=true
+[Process] Skipping SO6611 - validation failed
+[Process] Row 23: SO4430, $0 / $0, Refund=true
+[Process] Skipping SO4430 - validation failed
+[Process] Row 24: SO4530, $0 / $0, Refund=true
+[Process] Skipping SO4530 - validation failed
+[Process] Row 25: SO5179, $0 / $0, Refund=false
+[Process] Skipping SO5179 - validation failed
+[Process] No unprocessed rows found on this page
+[Pagination] Current page: 1/2
+[Pagination] Clicked next page button
+
+[Main] Processing page 2...
+
+[Process] Processing current page...
+[Process] Found 10 rows on page
+[Process] Row 1: SO7130, $0 / $0, Refund=true
+[Process] Skipping SO7130 - validation failed
+[Process] Row 2: SO4938, $0 / $0, Refund=false
+[Process] Skipping SO4938 - validation failed
+[Process] Row 3: SO6137, $0 / $0, Refund=true
+[Process] Skipping SO6137 - validation failed
+[Process] Row 4: SO2890, $0 / $0, Refund=true
+[Process] Skipping SO2890 - validation failed
+[Process] Row 5: SO6231, $0 / $0, Refund=true
+[Process] Skipping SO6231 - validation failed
+[Process] Row 6: SO4935, $0 / $0, Refund=true
+[Process] Skipping SO4935 - validation failed
+[Process] Row 7: SO5178, $0 / $0, Refund=false
+[Process] Skipping SO5178 - validation failed
+[Process] Row 8: SO6297, $0 / $0, Refund=true
+[Process] Skipping SO6297 - validation failed
+[Process] Row 9: SO4679, $0 / $0, Refund=true
+[Process] Skipping SO4679 - validation failed
+[Process] Row 10: SO7079, $0 / $0, Refund=true
+[Process] Skipping SO7079 - validation failed
+[Process] No unprocessed rows found on this page
+[Pagination] Current page: 2/2
+[Pagination] Reached last page (current page equals total pages)
+
+=== FULCRUM COMPLETE ===
+Processed: 0
+Action attempts: 0
+Errors: 0
+
+[SmartWait] === PERFORMANCE SUMMARY ===
+[SmartWait] Total time saved: 0.1 minutes (6 seconds)
+[SmartWait] Wait counts: { login: 1, navigation: 1, needsAction: 1 }
+[SmartWait] Total elapsed: 18 seconds
+[SmartWait] =========================
+[Browser] Closed
+
+📧 Running QBO processor...
+
+=====================================
+QBO Invoice Send Process
+=====================================
+Started at: 2026-05-05T06:38:37.090Z
+Environment: PRODUCTION
+=====================================
+
+🔐 Initializing authentication...
+[OAuth] Starting token refresh process...
+[OAuth] Loaded refresh token from Parameter Store
+[OAuth] Making refresh token request...
+[OAuth] Saved refresh token to Parameter Store: /qbo-invoice-sender/prod/refresh-token
+[OAuth] ✅ Token refresh successful!
+[OAuth] New refresh token saved to file
+[OAuth] Access token expires in: 3600 seconds
+✅ Authentication successful!
+
+📋 Fetching unsent invoices...
+[Invoice] Fetching invoices (paged, limited by recent window, then filtering in JS)...
+[QBO API] Executing query: SELECT Id, DocNumber, Balance, EmailStatus, CustomerRef, BillEmail, TxnDate
+    FROM Invoice
+    ORDER BY TxnDate DESC
+   STARTPOSITION 1 MAXRESULTS 1000
+[Invoice] Considered last 30 day(s): 525 invoices; 23 are unsent with balance > 0
+Found 23 invoice(s) to process.
+
+👥 Loading customer information...
+[Customer] Building customer map...
+[Customer] Fetching details for 8 unique customer(s)
+[QBO API] Executing query: SELECT Id, DisplayName, PrimaryEmailAddr FROM Customer WHERE Id IN ('5510','7406','5116','5246','8029','8021','8019','5477')
+[Customer] Loaded: Akos Fire Protection DBA Wiring Solutions Electrical (no email)
+[Customer] Loaded: Federal Signal (ap_invoices_up@federalsignal.com)
+[Customer] Loaded: HONEYWELL FIRE SYSTEMS CANADA (ar@rsgsecurity.com)
+[Customer] Loaded: HONEYWELL FIRE SYSTEMS, US (ACSAmericas_AP_PDFInvoices@honeywell.com,Liliana.Lopez@Honeywell.com)
+[Customer] Loaded: HUBBELL CARIBE LIMITED (BCaballe@hubbell.com)
+[Customer] Loaded: SIEMENS CANADA LIMITED (ar@rsgsecurity.com)
+[Customer] Loaded: SIEMENS INDUSTRY INC (ar@rsgsecurity.com)
+[Customer] Loaded: WJS INC (no email)
+Loaded 8 unique customer(s).
+
+[Customer] Customer "HONEYWELL FIRE SYSTEMS CANADA" matches exclusion list
+[Customer] Customer "HONEYWELL FIRE SYSTEMS CANADA" matches exclusion list
+[Customer] Customer "HONEYWELL FIRE SYSTEMS CANADA" matches exclusion list
+[Customer] Customer "HONEYWELL FIRE SYSTEMS CANADA" matches exclusion list
+[Customer] Customer "HONEYWELL FIRE SYSTEMS CANADA" matches exclusion list
+[Customer] Customer "HONEYWELL FIRE SYSTEMS CANADA" matches exclusion list
+[Customer] Customer "HONEYWELL FIRE SYSTEMS CANADA" matches exclusion list
+[Customer] Customer "SIEMENS INDUSTRY INC" matches exclusion list
+[Customer] Customer "SIEMENS CANADA LIMITED" matches exclusion list
+[Customer] Customer "HONEYWELL FIRE SYSTEMS CANADA" matches exclusion list
+[Customer] Customer "HONEYWELL FIRE SYSTEMS CANADA" matches exclusion list
+[Customer] Customer "HONEYWELL FIRE SYSTEMS CANADA" matches exclusion list
+[Customer] Customer "HONEYWELL FIRE SYSTEMS, US" matches exclusion list
+[Customer] Customer "Federal Signal" is not in the allowlist
+[Customer] Customer "Akos Fire Protection DBA Wiring Solutions Electrical" is not in the allowlist
+[Customer] Customer "HONEYWELL FIRE SYSTEMS, US" matches exclusion list
+[Customer] Customer "HONEYWELL FIRE SYSTEMS, US" matches exclusion list
+[Customer] Customer "SIEMENS CANADA LIMITED" matches exclusion list
+[Customer] Customer "WJS INC" is not in the allowlist
+[Customer] Customer "HONEYWELL FIRE SYSTEMS CANADA" matches exclusion list
+[Customer] Customer "HONEYWELL FIRE SYSTEMS, US" matches exclusion list
+[Customer] Customer "HONEYWELL FIRE SYSTEMS CANADA" matches exclusion list
+[Customer] Candidate policy summary: {"candidateInvoiceCount":23,"uniqueCustomerCount":8,"sendableCustomers":["HUBBELL CARIBE LIMITED"],"explicitlyExcludedCustomers":["HONEYWELL FIRE SYSTEMS CANADA","HONEYWELL FIRE SYSTEMS, US","SIEMENS CANADA LIMITED","SIEMENS INDUSTRY INC"],"allowlistMissCustomers":["Akos Fire Protection DBA Wiring Solutions Electrical","Federal Signal","WJS INC"],"sendableInvoiceCount":1,"explicitlyExcludedInvoiceCount":19,"allowlistMissInvoiceCount":3}
+📨 Processing invoices...
+=====================================
+[Customer] Customer "HONEYWELL FIRE SYSTEMS CANADA" matches exclusion list
+[Processor] ⚠️  Skipping invoice #F9673 - explicitly excluded customer
+[Customer] Customer "HONEYWELL FIRE SYSTEMS CANADA" matches exclusion list
+[Processor] ⚠️  Skipping invoice #F9670 - explicitly excluded customer
+[Customer] Customer "HONEYWELL FIRE SYSTEMS CANADA" matches exclusion list
+[Processor] ⚠️  Skipping invoice #F9662 - explicitly excluded customer
+[Customer] Customer "HONEYWELL FIRE SYSTEMS CANADA" matches exclusion list
+[Processor] ⚠️  Skipping invoice #F9660 - explicitly excluded customer
+[Customer] Customer "HONEYWELL FIRE SYSTEMS CANADA" matches exclusion list
+[Processor] ⚠️  Skipping invoice #F9659 - explicitly excluded customer
+[Customer] Customer "HONEYWELL FIRE SYSTEMS CANADA" matches exclusion list
+[Processor] ⚠️  Skipping invoice #F9658 - explicitly excluded customer
+[Customer] Customer "HONEYWELL FIRE SYSTEMS CANADA" matches exclusion list
+[Processor] ⚠️  Skipping invoice #F9648 - explicitly excluded customer
+[Customer] Customer "SIEMENS INDUSTRY INC" matches exclusion list
+[Processor] ⚠️  Skipping invoice #F9647 - explicitly excluded customer
+[Customer] Customer "SIEMENS CANADA LIMITED" matches exclusion list
+[Processor] ⚠️  Skipping invoice #F9639 - explicitly excluded customer
+[Customer] Customer "HONEYWELL FIRE SYSTEMS CANADA" matches exclusion list
+[Processor] ⚠️  Skipping invoice #F9630 - explicitly excluded customer
+[Customer] Customer "HONEYWELL FIRE SYSTEMS CANADA" matches exclusion list
+[Processor] ⚠️  Skipping invoice #F9627 - explicitly excluded customer
+[Customer] Customer "HONEYWELL FIRE SYSTEMS CANADA" matches exclusion list
+[Processor] ⚠️  Skipping invoice #F9622 - explicitly excluded customer
+[Customer] Customer "HONEYWELL FIRE SYSTEMS, US" matches exclusion list
+[Processor] ⚠️  Skipping invoice #F9603 - explicitly excluded customer
+[Customer] Customer "Federal Signal" is not in the allowlist
+[Processor] ⚠️  Skipping invoice #F9596 - customer not in allowlist
+No customer primary email defined. Erroring.
+[Processor] ❌ Error processing invoice: Customer Akos Fire Protection DBA Wiring Solutions Electrical has no primary email defined
+
+❌ Failed to process invoice ID=F9549
+Error: Customer Akos Fire Protection DBA Wiring Solutions Electrical has no primary email defined
+
+[Customer] Customer "HONEYWELL FIRE SYSTEMS, US" matches exclusion list
+[Processor] ⚠️  Skipping invoice #F9583 - explicitly excluded customer
+[Customer] Customer "HONEYWELL FIRE SYSTEMS, US" matches exclusion list
+[Processor] ⚠️  Skipping invoice #F9574 - explicitly excluded customer
+[Customer] Customer "SIEMENS CANADA LIMITED" matches exclusion list
+[Processor] ⚠️  Skipping invoice #F9573 - explicitly excluded customer
+No customer primary email defined. Erroring.
+[Processor] ❌ Error processing invoice: Customer WJS INC has no primary email defined
+
+❌ Failed to process invoice ID=F9554
+Error: Customer WJS INC has no primary email defined
+
+[Customer] Customer "HONEYWELL FIRE SYSTEMS CANADA" matches exclusion list
+[Processor] ⚠️  Skipping invoice #F9544 - explicitly excluded customer
+[Customer] Customer "HONEYWELL FIRE SYSTEMS, US" matches exclusion list
+[Processor] ⚠️  Skipping invoice #F9542 - explicitly excluded customer
+[Customer] Customer "HONEYWELL FIRE SYSTEMS CANADA" matches exclusion list
+[Processor] ⚠️  Skipping invoice #F9540 - explicitly excluded customer
+[Fulcrum] Starting data fetch for invoice #F9454
+[Fulcrum] POST /invoices/list?Skip=0&Take=50
+[Fulcrum] Request body: {
+  "Sort.Field": "issueDate",
+  "Sort.Dir": "descending"
+}
+[Fulcrum] POST /invoices/list?Skip=50&Take=50
+[Fulcrum] Request body: {
+  "Sort.Field": "issueDate",
+  "Sort.Dir": "descending"
+}
+[Fulcrum] POST /invoices/list?Skip=100&Take=50
+[Fulcrum] Request body: {
+  "Sort.Field": "issueDate",
+  "Sort.Dir": "descending"
+}
+[Fulcrum] POST /invoices/list?Skip=150&Take=50
+[Fulcrum] Request body: {
+  "Sort.Field": "issueDate",
+  "Sort.Dir": "descending"
+}
+[Fulcrum] POST /invoices/list?Skip=200&Take=50
+[Fulcrum] Request body: {
+  "Sort.Field": "issueDate",
+  "Sort.Dir": "descending"
+}
+[Fulcrum] POST /invoices/list?Skip=250&Take=50
+[Fulcrum] Request body: {
+  "Sort.Field": "issueDate",
+  "Sort.Dir": "descending"
+}
+[Fulcrum] POST /invoices/list?Skip=300&Take=50
+[Fulcrum] Request body: {
+  "Sort.Field": "issueDate",
+  "Sort.Dir": "descending"
+}
+[Fulcrum] POST /invoices/list?Skip=350&Take=50
+[Fulcrum] Request body: {
+  "Sort.Field": "issueDate",
+  "Sort.Dir": "descending"
+}
+[Fulcrum] POST /invoices/list?Skip=400&Take=50
+[Fulcrum] Request body: {
+  "Sort.Field": "issueDate",
+  "Sort.Dir": "descending"
+}
+[Fulcrum] POST /invoices/list?Skip=450&Take=50
+[Fulcrum] Request body: {
+  "Sort.Field": "issueDate",
+  "Sort.Dir": "descending"
+}
+[Fulcrum] POST /invoices/list?Skip=500&Take=50
+[Fulcrum] Request body: {
+  "Sort.Field": "issueDate",
+  "Sort.Dir": "descending"
+}
+[Fulcrum] POST /invoices/list?Skip=550&Take=50
+[Fulcrum] Request body: {
+  "Sort.Field": "issueDate",
+  "Sort.Dir": "descending"
+}
+[Fulcrum] POST /invoices/list?Skip=600&Take=50
+[Fulcrum] Request body: {
+  "Sort.Field": "issueDate",
+  "Sort.Dir": "descending"
+}
+[Fulcrum] POST /invoices/list?Skip=650&Take=50
+[Fulcrum] Request body: {
+  "Sort.Field": "issueDate",
+  "Sort.Dir": "descending"
+}
+[Fulcrum] POST /invoices/list?Skip=700&Take=50
+[Fulcrum] Request body: {
+  "Sort.Field": "issueDate",
+  "Sort.Dir": "descending"
+}
+[Fulcrum] POST /invoices/list?Skip=750&Take=50
+[Fulcrum] Request body: {
+  "Sort.Field": "issueDate",
+  "Sort.Dir": "descending"
+}
+[Fulcrum] POST /invoices/list?Skip=800&Take=50
+[Fulcrum] Request body: {
+  "Sort.Field": "issueDate",
+  "Sort.Dir": "descending"
+}
+[Fulcrum] POST /invoices/list?Skip=850&Take=50
+[Fulcrum] Request body: {
+  "Sort.Field": "issueDate",
+  "Sort.Dir": "descending"
+}
+[Fulcrum] POST /invoices/list?Skip=900&Take=50
+[Fulcrum] Request body: {
+  "Sort.Field": "issueDate",
+  "Sort.Dir": "descending"
+}
+[Fulcrum] POST /invoices/list?Skip=950&Take=50
+[Fulcrum] Request body: {
+  "Sort.Field": "issueDate",
+  "Sort.Dir": "descending"
+}
+[Fulcrum] POST /invoices/list?Skip=1000&Take=50
+[Fulcrum] Request body: {
+  "Sort.Field": "issueDate",
+  "Sort.Dir": "descending"
+}
+[Fulcrum] POST /invoices/list?Skip=1050&Take=50
+[Fulcrum] Request body: {
+  "Sort.Field": "issueDate",
+  "Sort.Dir": "descending"
+}
+[Fulcrum] POST /invoices/list?Skip=1100&Take=50
+[Fulcrum] Request body: {
+  "Sort.Field": "issueDate",
+  "Sort.Dir": "descending"
+}
+[Fulcrum] POST /invoices/list?Skip=1150&Take=50
+[Fulcrum] Request body: {
+  "Sort.Field": "issueDate",
+  "Sort.Dir": "descending"
+}
+[Fulcrum] POST /invoices/list?Skip=1200&Take=50
+[Fulcrum] Request body: {
+  "Sort.Field": "issueDate",
+  "Sort.Dir": "descending"
+}
+[Fulcrum] POST /invoices/list?Skip=1250&Take=50
+[Fulcrum] Request body: {
+  "Sort.Field": "issueDate",
+  "Sort.Dir": "descending"
+}
+[Fulcrum] POST /invoices/list?Skip=1300&Take=50
+[Fulcrum] Request body: {
+  "Sort.Field": "issueDate",
+  "Sort.Dir": "descending"
+}
+[Fulcrum] POST /invoices/list?Skip=1350&Take=50
+[Fulcrum] Request body: {
+  "Sort.Field": "issueDate",
+  "Sort.Dir": "descending"
+}
+[Fulcrum] POST /invoices/list?Skip=1400&Take=50
+[Fulcrum] Request body: {
+  "Sort.Field": "issueDate",
+  "Sort.Dir": "descending"
+}
+[Fulcrum] POST /invoices/list?Skip=1450&Take=50
+[Fulcrum] Request body: {
+  "Sort.Field": "issueDate",
+  "Sort.Dir": "descending"
+}
+[Fulcrum] POST /invoices/list?Skip=1500&Take=50
+[Fulcrum] Request body: {
+  "Sort.Field": "issueDate",
+  "Sort.Dir": "descending"
+}
+[Fulcrum] POST /invoices/list?Skip=1550&Take=50
+[Fulcrum] Request body: {
+  "Sort.Field": "issueDate",
+  "Sort.Dir": "descending"
+}
+[Fulcrum] POST /invoices/list?Skip=1600&Take=50
+[Fulcrum] Request body: {
+  "Sort.Field": "issueDate",
+  "Sort.Dir": "descending"
+}
+[Fulcrum] POST /invoices/list?Skip=1650&Take=50
+[Fulcrum] Request body: {
+  "Sort.Field": "issueDate",
+  "Sort.Dir": "descending"
+}
+[Fulcrum] POST /invoices/list?Skip=1700&Take=50
+[Fulcrum] Request body: {
+  "Sort.Field": "issueDate",
+  "Sort.Dir": "descending"
+}
+[Fulcrum] POST /invoices/list?Skip=1750&Take=50
+[Fulcrum] Request body: {
+  "Sort.Field": "issueDate",
+  "Sort.Dir": "descending"
+}
+[Fulcrum] POST /invoices/list?Skip=1800&Take=50
+[Fulcrum] Request body: {
+  "Sort.Field": "issueDate",
+  "Sort.Dir": "descending"
+}
+[Fulcrum] POST /invoices/list?Skip=1850&Take=50
+[Fulcrum] Request body: {
+  "Sort.Field": "issueDate",
+  "Sort.Dir": "descending"
+}
+[Fulcrum] POST /invoices/list?Skip=1900&Take=50
+[Fulcrum] Request body: {
+  "Sort.Field": "issueDate",
+  "Sort.Dir": "descending"
+}
+[Fulcrum] POST /invoices/list?Skip=1950&Take=50
+[Fulcrum] Request body: {
+  "Sort.Field": "issueDate",
+  "Sort.Dir": "descending"
+}
+[Fulcrum] POST /invoices/list?Skip=2000&Take=50
+[Fulcrum] Request body: {
+  "Sort.Field": "issueDate",
+  "Sort.Dir": "descending"
+}
+[Fulcrum] POST /invoices/list?Skip=2050&Take=50
+[Fulcrum] Request body: {
+  "Sort.Field": "issueDate",
+  "Sort.Dir": "descending"
+}
+[Fulcrum] POST /invoices/list?Skip=2100&Take=50
+[Fulcrum] Request body: {
+  "Sort.Field": "issueDate",
+  "Sort.Dir": "descending"
+}
+[Fulcrum] POST /invoices/list?Skip=2150&Take=50
+[Fulcrum] Request body: {
+  "Sort.Field": "issueDate",
+  "Sort.Dir": "descending"
+}
+[Fulcrum] POST /invoices/list?Skip=2200&Take=50
+[Fulcrum] Request body: {
+  "Sort.Field": "issueDate",
+  "Sort.Dir": "descending"
+}
+[Fulcrum] POST /invoices/list?Skip=2250&Take=50
+[Fulcrum] Request body: {
+  "Sort.Field": "issueDate",
+  "Sort.Dir": "descending"
+}
+[Fulcrum] POST /invoices/list?Skip=2300&Take=50
+[Fulcrum] Request body: {
+  "Sort.Field": "issueDate",
+  "Sort.Dir": "descending"
+}
+[Fulcrum] POST /invoices/list?Skip=2350&Take=50
+[Fulcrum] Request body: {
+  "Sort.Field": "issueDate",
+  "Sort.Dir": "descending"
+}
+[Fulcrum] POST /invoices/list?Skip=2400&Take=50
+[Fulcrum] Request body: {
+  "Sort.Field": "issueDate",
+  "Sort.Dir": "descending"
+}
+[Fulcrum] POST /invoices/list?Skip=2450&Take=50
+[Fulcrum] Request body: {
+  "Sort.Field": "issueDate",
+  "Sort.Dir": "descending"
+}
+[Fulcrum] POST /invoices/list?Skip=2500&Take=50
+[Fulcrum] Request body: {
+  "Sort.Field": "issueDate",
+  "Sort.Dir": "descending"
+}
+[Fulcrum] POST /invoices/list?Skip=2550&Take=50
+[Fulcrum] Request body: {
+  "Sort.Field": "issueDate",
+  "Sort.Dir": "descending"
+}
+[Fulcrum] POST /invoices/list?Skip=2600&Take=50
+[Fulcrum] Request body: {
+  "Sort.Field": "issueDate",
+  "Sort.Dir": "descending"
+}
+[Fulcrum] POST /invoices/list?Skip=2650&Take=50
+[Fulcrum] Request body: {
+  "Sort.Field": "issueDate",
+  "Sort.Dir": "descending"
+}
+[Fulcrum] POST /invoices/list?Skip=2700&Take=50
+[Fulcrum] Request body: {
+  "Sort.Field": "issueDate",
+  "Sort.Dir": "descending"
+}
+[Fulcrum] POST /invoices/list?Skip=2750&Take=50
+[Fulcrum] Request body: {
+  "Sort.Field": "issueDate",
+  "Sort.Dir": "descending"
+}
+[Fulcrum] POST /invoices/list?Skip=2800&Take=50
+[Fulcrum] Request body: {
+  "Sort.Field": "issueDate",
+  "Sort.Dir": "descending"
+}
+[Fulcrum] POST /invoices/list?Skip=2850&Take=50
+[Fulcrum] Request body: {
+  "Sort.Field": "issueDate",
+  "Sort.Dir": "descending"
+}
+[Fulcrum] POST /invoices/list?Skip=2900&Take=50
+[Fulcrum] Request body: {
+  "Sort.Field": "issueDate",
+  "Sort.Dir": "descending"
+}
+[Fulcrum] POST /invoices/list?Skip=2950&Take=50
+[Fulcrum] Request body: {
+  "Sort.Field": "issueDate",
+  "Sort.Dir": "descending"
+}
+[Fulcrum] POST /invoices/list?Skip=3000&Take=50
+[Fulcrum] Request body: {
+  "Sort.Field": "issueDate",
+  "Sort.Dir": "descending"
+}
+[Fulcrum] POST /invoices/list?Skip=3050&Take=50
+[Fulcrum] Request body: {
+  "Sort.Field": "issueDate",
+  "Sort.Dir": "descending"
+}
+[Fulcrum] POST /invoices/list?Skip=3100&Take=50
+[Fulcrum] Request body: {
+  "Sort.Field": "issueDate",
+  "Sort.Dir": "descending"
+}
+[Fulcrum] POST /invoices/list?Skip=3150&Take=50
+[Fulcrum] Request body: {
+  "Sort.Field": "issueDate",
+  "Sort.Dir": "descending"
+}
+[Fulcrum] POST /invoices/list?Skip=3200&Take=50
+[Fulcrum] Request body: {
+  "Sort.Field": "issueDate",
+  "Sort.Dir": "descending"
+}
+[Fulcrum] POST /invoices/list?Skip=3250&Take=50
+[Fulcrum] Request body: {
+  "Sort.Field": "issueDate",
+  "Sort.Dir": "descending"
+}
+[Fulcrum] POST /invoices/list?Skip=3300&Take=50
+[Fulcrum] Request body: {
+  "Sort.Field": "issueDate",
+  "Sort.Dir": "descending"
+}
+[Fulcrum] POST /invoices/list?Skip=3350&Take=50
+[Fulcrum] Request body: {
+  "Sort.Field": "issueDate",
+  "Sort.Dir": "descending"
+}
+[Fulcrum] POST /invoices/list?Skip=3400&Take=50
+[Fulcrum] Request body: {
+  "Sort.Field": "issueDate",
+  "Sort.Dir": "descending"
+}
+[Fulcrum] POST /invoices/list?Skip=3450&Take=50
+[Fulcrum] Request body: {
+  "Sort.Field": "issueDate",
+  "Sort.Dir": "descending"
+}
+[Fulcrum] POST /invoices/list?Skip=3500&Take=50
+[Fulcrum] Request body: {
+  "Sort.Field": "issueDate",
+  "Sort.Dir": "descending"
+}
+[Fulcrum] POST /invoices/list?Skip=3550&Take=50
+[Fulcrum] Request body: {
+  "Sort.Field": "issueDate",
+  "Sort.Dir": "descending"
+}
+[Fulcrum] POST /invoices/list?Skip=3600&Take=50
+[Fulcrum] Request body: {
+  "Sort.Field": "issueDate",
+  "Sort.Dir": "descending"
+}
+[Fulcrum] POST /invoices/list?Skip=3650&Take=50
+[Fulcrum] Request body: {
+  "Sort.Field": "issueDate",
+  "Sort.Dir": "descending"
+}
+[Fulcrum] POST /invoices/list?Skip=3700&Take=50
+[Fulcrum] Request body: {
+  "Sort.Field": "issueDate",
+  "Sort.Dir": "descending"
+}
+[Fulcrum] POST /invoices/list?Skip=3750&Take=50
+[Fulcrum] Request body: {
+  "Sort.Field": "issueDate",
+  "Sort.Dir": "descending"
+}
+[Fulcrum] POST /invoices/list?Skip=3800&Take=50
+[Fulcrum] Request body: {
+  "Sort.Field": "issueDate",
+  "Sort.Dir": "descending"
+}
+[Fulcrum] POST /invoices/list?Skip=3850&Take=50
+[Fulcrum] Request body: {
+  "Sort.Field": "issueDate",
+  "Sort.Dir": "descending"
+}
+[Fulcrum] POST /invoices/list?Skip=3900&Take=50
+[Fulcrum] Request body: {
+  "Sort.Field": "issueDate",
+  "Sort.Dir": "descending"
+}
+[Fulcrum] POST /invoices/list?Skip=3950&Take=50
+[Fulcrum] Request body: {
+  "Sort.Field": "issueDate",
+  "Sort.Dir": "descending"
+}
+[Fulcrum] POST /invoices/list?Skip=4000&Take=50
+[Fulcrum] Request body: {
+  "Sort.Field": "issueDate",
+  "Sort.Dir": "descending"
+}
+[Fulcrum] POST /invoices/list?Skip=4050&Take=50
+[Fulcrum] Request body: {
+  "Sort.Field": "issueDate",
+  "Sort.Dir": "descending"
+}
+[Fulcrum] POST /invoices/list?Skip=4100&Take=50
+[Fulcrum] Request body: {
+  "Sort.Field": "issueDate",
+  "Sort.Dir": "descending"
+}
+[Fulcrum] POST /invoices/list?Skip=4150&Take=50
+[Fulcrum] Request body: {
+  "Sort.Field": "issueDate",
+  "Sort.Dir": "descending"
+}
+[Fulcrum] POST /invoices/list?Skip=4200&Take=50
+[Fulcrum] Request body: {
+  "Sort.Field": "issueDate",
+  "Sort.Dir": "descending"
+}
+[Fulcrum] POST /invoices/list?Skip=4250&Take=50
+[Fulcrum] Request body: {
+  "Sort.Field": "issueDate",
+  "Sort.Dir": "descending"
+}
+[Fulcrum] POST /invoices/list?Skip=4300&Take=50
+[Fulcrum] Request body: {
+  "Sort.Field": "issueDate",
+  "Sort.Dir": "descending"
+}
+[Fulcrum] POST /invoices/list?Skip=4350&Take=50
+[Fulcrum] Request body: {
+  "Sort.Field": "issueDate",
+  "Sort.Dir": "descending"
+}
+[Fulcrum] POST /invoices/list?Skip=4400&Take=50
+[Fulcrum] Request body: {
+  "Sort.Field": "issueDate",
+  "Sort.Dir": "descending"
+}
+[Fulcrum] POST /invoices/list?Skip=4450&Take=50
+[Fulcrum] Request body: {
+  "Sort.Field": "issueDate",
+  "Sort.Dir": "descending"
+}
+[Fulcrum] POST /invoices/list?Skip=4500&Take=50
+[Fulcrum] Request body: {
+  "Sort.Field": "issueDate",
+  "Sort.Dir": "descending"
+}
+[Fulcrum] POST /invoices/list?Skip=4550&Take=50
+[Fulcrum] Request body: {
+  "Sort.Field": "issueDate",
+  "Sort.Dir": "descending"
+}
+[Fulcrum] POST /invoices/list?Skip=4600&Take=50
+[Fulcrum] Request body: {
+  "Sort.Field": "issueDate",
+  "Sort.Dir": "descending"
+}
+[Fulcrum] POST /invoices/list?Skip=4650&Take=50
+[Fulcrum] Request body: {
+  "Sort.Field": "issueDate",
+  "Sort.Dir": "descending"
+}
+[Fulcrum] POST /invoices/list?Skip=4700&Take=50
+[Fulcrum] Request body: {
+  "Sort.Field": "issueDate",
+  "Sort.Dir": "descending"
+}
+[Fulcrum] POST /invoices/list?Skip=4750&Take=50
+[Fulcrum] Request body: {
+  "Sort.Field": "issueDate",
+  "Sort.Dir": "descending"
+}
+[Fulcrum] POST /invoices/list?Skip=4800&Take=50
+[Fulcrum] Request body: {
+  "Sort.Field": "issueDate",
+  "Sort.Dir": "descending"
+}
+[Fulcrum] POST /invoices/list?Skip=4850&Take=50
+[Fulcrum] Request body: {
+  "Sort.Field": "issueDate",
+  "Sort.Dir": "descending"
+}
+[Fulcrum] POST /invoices/list?Skip=4900&Take=50
+[Fulcrum] Request body: {
+  "Sort.Field": "issueDate",
+  "Sort.Dir": "descending"
+}
+[Fulcrum] POST /invoices/list?Skip=4950&Take=50
+[Fulcrum] Request body: {
+  "Sort.Field": "issueDate",
+  "Sort.Dir": "descending"
+}
+[Fulcrum] POST /invoices/list?Skip=5000&Take=50
+[Fulcrum] Request body: {
+  "Sort.Field": "issueDate",
+  "Sort.Dir": "descending"
+}
+[Fulcrum] POST /invoices/list?Skip=5050&Take=50
+[Fulcrum] Request body: {
+  "Sort.Field": "issueDate",
+  "Sort.Dir": "descending"
+}
+[Fulcrum] POST /invoices/list?Skip=5100&Take=50
+[Fulcrum] Request body: {
+  "Sort.Field": "issueDate",
+  "Sort.Dir": "descending"
+}
+[Fulcrum] POST /invoices/list?Skip=5150&Take=50
+[Fulcrum] Request body: {
+  "Sort.Field": "issueDate",
+  "Sort.Dir": "descending"
+}
+[Fulcrum] POST /invoices/list?Skip=5200&Take=50
+[Fulcrum] Request body: {
+  "Sort.Field": "issueDate",
+  "Sort.Dir": "descending"
+}
+[Fulcrum] POST /invoices/list?Skip=5250&Take=50
+[Fulcrum] Request body: {
+  "Sort.Field": "issueDate",
+  "Sort.Dir": "descending"
+}
+[Fulcrum] POST /invoices/list?Skip=5300&Take=50
+[Fulcrum] Request body: {
+  "Sort.Field": "issueDate",
+  "Sort.Dir": "descending"
+}
+[Fulcrum] POST /invoices/list?Skip=5350&Take=50
+[Fulcrum] Request body: {
+  "Sort.Field": "issueDate",
+  "Sort.Dir": "descending"
+}
+[Fulcrum] POST /invoices/list?Skip=5400&Take=50
+[Fulcrum] Request body: {
+  "Sort.Field": "issueDate",
+  "Sort.Dir": "descending"
+}
+[Fulcrum] POST /invoices/list?Skip=5450&Take=50
+[Fulcrum] Request body: {
+  "Sort.Field": "issueDate",
+  "Sort.Dir": "descending"
+}
+[Fulcrum] POST /invoices/list?Skip=5500&Take=50
+[Fulcrum] Request body: {
+  "Sort.Field": "issueDate",
+  "Sort.Dir": "descending"
+}
+[Fulcrum] POST /invoices/list?Skip=5550&Take=50
+[Fulcrum] Request body: {
+  "Sort.Field": "issueDate",
+  "Sort.Dir": "descending"
+}
+[Fulcrum] POST /invoices/list?Skip=5600&Take=50
+[Fulcrum] Request body: {
+  "Sort.Field": "issueDate",
+  "Sort.Dir": "descending"
+}
+[Fulcrum] POST /invoices/list?Skip=5650&Take=50
+[Fulcrum] Request body: {
+  "Sort.Field": "issueDate",
+  "Sort.Dir": "descending"
+}
+[Fulcrum] POST /invoices/list?Skip=5700&Take=50
+[Fulcrum] Request body: {
+  "Sort.Field": "issueDate",
+  "Sort.Dir": "descending"
+}
+[Fulcrum] POST /invoices/list?Skip=5750&Take=50
+[Fulcrum] Request body: {
+  "Sort.Field": "issueDate",
+  "Sort.Dir": "descending"
+}
