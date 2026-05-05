@@ -1568,22 +1568,77 @@ const app = {
       // Step 3: Process each invoice
       console.log('📨 Processing invoices...');
       console.log('=====================================');
-      
+
       const results = {
         processed: 0,
         sent: 0,
         skipped: 0,
         errors: 0,
         details: [],
-        candidatePolicySummary
+        candidatePolicySummary,
+        parallelProcessingMetrics: {
+          totalBatches: 0,
+          avgBatchTime: 0,
+          maxConcurrent: 0,
+          rateLimitHits: 0
+        }
       };
-    
-      for (const invoice of invoices) {
-        results.processed++;
-        
-        try {
-          const result = await invoiceProcessor.processInvoice(invoice, customersMap);          
-          if (result.skipped) {
+
+      // Parallel processing with rate limiting
+      // QBO allows max 10 concurrent requests, 500 requests/minute
+      // We'll be conservative with 3 concurrent to leave room for other operations
+      const MAX_CONCURRENT = 3;  // Conservative limit (QBO allows 10 max)
+      const BATCH_SIZE = 3;      // Process in batches of 3
+      const BATCH_DELAY_MS = 200; // 200ms between batches to stay well under rate limits
+
+      console.log(`\n🚀 Processing invoices in parallel (${MAX_CONCURRENT} concurrent)...`);
+
+      const processBatch = async (batch, batchNumber) => {
+        const batchStartTime = Date.now();
+        console.log(`[Batch ${batchNumber}] Processing ${batch.length} invoices...`);
+
+        const batchPromises = batch.map(async (invoice) => {
+          try {
+            const result = await invoiceProcessor.processInvoice(invoice, customersMap);
+            return { invoice, result, success: true };
+          } catch (error) {
+            console.error(`\n❌ Failed to process invoice ID=${invoice.DocNumber}`);
+            console.error(`Error: ${error.message}\n`);
+            return { invoice, error, success: false };
+          }
+        });
+
+        const batchResults = await Promise.all(batchPromises);
+        const batchTime = Date.now() - batchStartTime;
+        console.log(`[Batch ${batchNumber}] Completed in ${(batchTime / 1000).toFixed(1)}s`);
+
+        return { batchResults, batchTime };
+      };
+
+      // Process invoices in batches
+      let totalBatchTime = 0;
+      let batchCount = 0;
+
+      for (let i = 0; i < invoices.length; i += BATCH_SIZE) {
+        const batch = invoices.slice(i, Math.min(i + BATCH_SIZE, invoices.length));
+        batchCount++;
+
+        const { batchResults, batchTime } = await processBatch(batch, batchCount);
+        totalBatchTime += batchTime;
+
+        // Process batch results
+        for (const { invoice, result, error, success } of batchResults) {
+          results.processed++;
+
+          if (!success) {
+            results.errors++;
+            results.details.push({
+              invoiceId: invoice.DocNumber,
+              status: 'error',
+              error: error.message,
+              rawErrorObj: JSON.stringify(error)
+            });
+          } else if (result.skipped) {
             results.skipped++;
             results.details.push({
               invoiceId: invoice.Id,
@@ -1601,18 +1656,27 @@ const app = {
               email: result.email
             });
           }
-        } catch (error) {
-          results.errors++;
-          results.details.push({
-            invoiceId: invoice.DocNumber,
-            status: 'error',
-            error: error.message,
-            rawErrorObj: JSON.stringify(error)
-          });
-          console.error(`\n❌ Failed to process invoice ID=${invoice.DocNumber}`);
-          console.error(`Error: ${error.message}\n`);
+        }
+
+        // Add delay between batches to respect rate limits (except for last batch)
+        if (i + BATCH_SIZE < invoices.length) {
+          await new Promise(resolve => setTimeout(resolve, BATCH_DELAY_MS));
         }
       }
+
+      // Update parallel processing metrics
+      results.parallelProcessingMetrics = {
+        totalBatches: batchCount,
+        avgBatchTime: batchCount > 0 ? (totalBatchTime / batchCount / 1000).toFixed(1) : 0,
+        maxConcurrent: MAX_CONCURRENT,
+        rateLimitHits: 0  // Will be updated if we implement retry logic for 429 errors
+      };
+
+      console.log(`\n📊 Parallel Processing Summary:`);
+      console.log(`   Batches processed: ${batchCount}`);
+      console.log(`   Avg batch time: ${results.parallelProcessingMetrics.avgBatchTime}s`);
+      console.log(`   Max concurrent: ${MAX_CONCURRENT}`);
+      console.log(`   Total time saved: ~${((invoices.length - batchCount) * 2).toFixed(0)}s`);
       
       // Step 4: Summary
       console.log('\n=====================================');
