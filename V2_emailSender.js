@@ -27,6 +27,80 @@ const dynamoDbClient = new DynamoDBClient({ region: process.env.AWS_REGION || 'u
 const DEFAULT_INVOCATION_LOCK_NAME = 'rsg-invoice-processor';
 
 // ===========================
+// Enhanced Logging System
+// ===========================
+const logger = {
+  startTime: Date.now(),
+  metrics: {
+    fulcrumTime: 0,
+    qboTime: 0,
+    emailTime: 0,
+    totalTime: 0,
+    retryCount: 0,
+    errorCount: 0,
+    invoicesProcessed: 0,
+    invoicesSent: 0,
+    invoicesSkipped: 0,
+    fulcrumProcessed: 0,
+    fulcrumErrors: 0
+  },
+
+  // Structured logging for CloudWatch
+  log(level, message, data = {}) {
+    const timestamp = new Date().toISOString();
+    const elapsed = ((Date.now() - this.startTime) / 1000).toFixed(1);
+
+    const logEntry = {
+      timestamp,
+      level,
+      message,
+      elapsed: `${elapsed}s`,
+      ...data
+    };
+
+    // For CloudWatch structured logging in Lambda
+    if (process.env.AWS_LAMBDA_FUNCTION_NAME) {
+      console.log(JSON.stringify(logEntry));
+    } else {
+      // For local development - human readable with existing format
+      console.log(message, data.details || '');
+    }
+
+    // Track errors for reporting
+    if (level === 'ERROR') {
+      this.metrics.errorCount++;
+    }
+  },
+
+  info(message, data) { this.log('INFO', message, data); },
+  warn(message, data) { this.log('WARN', message, data); },
+  error(message, data) { this.log('ERROR', message, data); },
+
+  metric(name, value) {
+    this.metrics[name] = value;
+    this.log('METRIC', `${name}: ${value}`, { metric: name, value });
+  },
+
+  getMetrics() {
+    this.metrics.totalTime = ((Date.now() - this.startTime) / 1000).toFixed(1);
+    return this.metrics;
+  },
+
+  // Track stage timing
+  startStage(stageName) {
+    this[`${stageName}StartTime`] = Date.now();
+    this.log('INFO', `Starting ${stageName}...`, { stage: stageName });
+  },
+
+  endStage(stageName) {
+    const duration = ((Date.now() - this[`${stageName}StartTime`]) / 1000).toFixed(1);
+    this.metrics[`${stageName}Time`] = duration;
+    this.log('INFO', `Completed ${stageName} in ${duration}s`, { stage: stageName, duration });
+    return duration;
+  }
+};
+
+// ===========================
 // Configuration Module
 // ===========================
 const config = {
@@ -85,7 +159,8 @@ const config = {
 // Email notification module
 function buildSummaryEmailContent(results, fulcrumResults = null, { now = new Date(), environmentLabel = activeConfig === config.sandbox ? 'SANDBOX' : 'PRODUCTION' } = {}) {
   const dateStr = now.toISOString().split("T")[0];
-  const subject = `QBO Invoice Processing Summary on ${dateStr} - ${results.sent} sent, ${results.skipped} skipped, ${results.errors} errors`;
+  const metrics = logger.getMetrics();
+  const subject = `QBO Invoice Processing Summary on ${dateStr} - ${results.sent} sent, ${results.skipped} skipped, ${results.errors} errors [${metrics.totalTime}s]`;
   const details = results?.details || [];
   const candidatePolicySummary = results?.candidatePolicySummary || {
     candidateInvoiceCount: 0,
@@ -166,6 +241,15 @@ function buildSummaryEmailContent(results, fulcrumResults = null, { now = new Da
       ==============================
       Date: ${now.toISOString()}
       Environment: ${environmentLabel}
+
+      Performance Metrics:
+      -------------------
+      Total runtime: ${metrics.totalTime}s
+      Fulcrum stage: ${metrics.fulcrumTime || '0'}s
+      QBO stage: ${metrics.qboTime || '0'}s
+      Email stage: ${metrics.emailTime || '0'}s
+      ${results.parallelProcessingMetrics ? `Parallel processing: ${results.parallelProcessingMetrics.totalBatches} batches, avg ${results.parallelProcessingMetrics.avgBatchTime}s/batch` : ''}
+      ${metrics.retryCount > 0 ? `Retries performed: ${metrics.retryCount}` : ''}
 
       Results:
       --------
@@ -1568,6 +1652,7 @@ const app = {
       // Step 3: Process each invoice
       console.log('📨 Processing invoices...');
       console.log('=====================================');
+      logger.startStage('qbo');
 
       const results = {
         processed: 0,
@@ -1672,6 +1757,7 @@ const app = {
         rateLimitHits: 0  // Will be updated if we implement retry logic for 429 errors
       };
 
+      logger.endStage('qbo');
       console.log(`\n📊 Parallel Processing Summary:`);
       console.log(`   Batches processed: ${batchCount}`);
       console.log(`   Avg batch time: ${results.parallelProcessingMetrics.avgBatchTime}s`);
@@ -1688,6 +1774,11 @@ const app = {
       console.log(`❌ Errors: ${results.errors}`);
       console.log(`Completed at: ${new Date().toISOString()}`);
       
+      // Update logger metrics
+      logger.metrics.invoicesProcessed = results.processed;
+      logger.metrics.invoicesSent = results.sent;
+      logger.metrics.invoicesSkipped = results.skipped;
+
       // Log any errors for review
       if (results.errors > 0) {
         console.log('\nERROR DETAILS:');
@@ -1697,9 +1788,9 @@ const app = {
             console.log(`- Invoice ${d.invoiceId}: ${d.error}`);
           });
       }
-      
+
       console.log('=====================================\n');
-      
+
       return results;
       
     } catch (error) {
@@ -1732,17 +1823,25 @@ if (import.meta.url === `file://${process.argv[1]}`) {
       
       if (fulcrumUsername && fulcrumPassword) {
         console.log('🤖 Running Fulcrum processor (visible browser)...\n');
+        logger.startStage('fulcrum');
         fulcrumResults = await runFulcrumProcessor(
           fulcrumUsername,
           fulcrumPassword,
           false // headless=false for local (visible browser)
         );
+        logger.endStage('fulcrum');
+        if (fulcrumResults) {
+          logger.metrics.fulcrumProcessed = fulcrumResults.processedInvoices?.length || 0;
+          logger.metrics.fulcrumErrors = fulcrumResults.errors?.length || 0;
+        }
       }
-      
+
       console.log('\n📧 Running QBO processor...\n');
       const qboResults = await app.run();
-      
+
+      logger.startStage('email');
       await emailModule.sendSummaryEmail(qboResults, fulcrumResults);
+      logger.endStage('email');
       
       console.log('\n✓ Local execution completed\n');
       
@@ -2053,16 +2152,21 @@ export const handler = async (event, context) => {
       try {
         const fulcrumRunOptions = buildFulcrumRunOptions(event, context);
         console.log('[Fulcrum] Run options:', JSON.stringify(fulcrumRunOptions));
+        logger.startStage('fulcrum');
         fulcrumResults = await runFulcrumProcessor(
           fulcrumUsername,
           fulcrumPassword,
           true, // headless mode for Lambda
           fulcrumRunOptions
         );
-        
+        logger.endStage('fulcrum');
+
+        logger.metrics.fulcrumProcessed = fulcrumResults.processedInvoices?.length || 0;
+        logger.metrics.fulcrumErrors = fulcrumResults.errors?.length || 0;
         console.log(`\n[Fulcrum] Completed - ${fulcrumResults.processedInvoices.length} processed, ${fulcrumResults.errors.length} errors\n`);
       } catch (fulcrumError) {
         console.error('[Fulcrum] Processing failed:', fulcrumError);
+        logger.error('Fulcrum stage failed', { error: fulcrumError.message, stack: fulcrumError.stack });
         fulcrumResults = {
           processedInvoices: [],
           errors: [`Fatal Fulcrum error: ${fulcrumError.message}`],
@@ -2083,7 +2187,9 @@ export const handler = async (event, context) => {
     // =====================================
     // SEND COMBINED EMAIL SUMMARY
     // =====================================
+    logger.startStage('email');
     await emailModule.sendSummaryEmail(qboResults, fulcrumResults);
+    logger.endStage('email');
     
     return {
       statusCode: 200,
