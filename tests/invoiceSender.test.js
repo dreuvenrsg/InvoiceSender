@@ -9,7 +9,7 @@ test('summary email separates explicit exclusions from allowlist misses', () => 
     processed: 3,
     sent: 0,
     skipped: 3,
-    errors: 0,
+    errors: 3,
     candidatePolicySummary: {
       candidateInvoiceCount: 5,
       uniqueCustomerCount: 4,
@@ -41,6 +41,21 @@ test('summary email separates explicit exclusions from allowlist misses', () => 
         customer: 'Summit Fire & Security',
         reason: 'not_in_allowlist',
         skipCategory: 'allowlist_miss'
+      },
+      {
+        invoiceId: 'F1004',
+        status: 'error',
+        error: 'Customer Summit Fire & Security has no primary email defined'
+      },
+      {
+        invoiceId: 'F1005',
+        status: 'error',
+        error: '{"message":"[Fulcrum] No shipments found for SO: 221986/F1005/Sales OrderId in Fulcrum:abc123"}'
+      },
+      {
+        invoiceId: 'SYSTEM',
+        status: 'error',
+        error: 'Fatal system error: browser crashed'
       }
     ]
   };
@@ -71,12 +86,21 @@ test('summary email separates explicit exclusions from allowlist misses', () => 
   assert.deepEqual(emailContext.qbo.explicitlyExcludedCustomers, explicitlyExcludedCustomers);
   assert.deepEqual(emailContext.qbo.allowlistMissCustomers, allowlistMissCustomers);
   assert.equal(emailContext.qbo.candidatePolicySummary.candidateInvoiceCount, 5);
-  assert.match(body, /Explicitly excluded customers: \{HONEYWELL FIRE SYSTEMS, US, SIEMENS CANADA LIMITED\}/);
-  assert.match(body, /Customers skipped because not in allowlist: \{Summit Fire & Security\}/);
-  assert.match(body, /Candidate invoices before processing: 5/);
-  assert.match(body, /Sendable customers considered: \{Johnson Controls Fire Protection LP\}/);
-  assert.match(body, /Skipped invoice: F1001 for customer: SIEMENS CANADA LIMITED and was skipped because category: explicit_exclusion/);
-  assert.match(body, /Skipped invoice: F1003 for customer: Summit Fire & Security and was skipped because category: allowlist_miss/);
+  assert.match(body, /ACTION REQUIRED/);
+  assert.match(body, /Add customers to allowlist \(these invoices were skipped because the customer is not yet approved to receive invoices\)/);
+  assert.match(body, /- Summit Fire & Security: F1003/);
+  assert.match(body, /Add missing customer email addresses in QBO/);
+  assert.match(body, /- Summit Fire & Security: F1004/);
+  assert.match(body, /Review shipment issues/);
+  assert.match(body, /- F1005: \[Fulcrum\] No shipments found/);
+  assert.match(body, /Review unexpected system errors/);
+  assert.match(body, /- SYSTEM: Fatal system error: browser crashed/);
+  assert.match(body, /- Explicit exclusions honored: HONEYWELL FIRE SYSTEMS, US, SIEMENS CANADA LIMITED/);
+  assert.match(body, /Run Metrics/);
+  assert.match(body, /Total runtime: \d+\.\d min/);
+  assert.match(body, /Fulcrum stage: \d+\.\d min/);
+  assert.match(body, /QBO stage: \d+\.\d min/);
+  assert.doesNotMatch(body, /The errors are:/);
 });
 
 test('summary email reports bounded Fulcrum processing', () => {
@@ -91,7 +115,7 @@ test('summary email reports bounded Fulcrum processing', () => {
     processedInvoices: [],
     errors: [],
     stoppedEarly: true,
-    stopReason: 'reached Fulcrum action limit (25)'
+    stopReason: 'reached Fulcrum time budget'
   };
 
   const { body, emailContext } = buildSummaryEmailContent(results, fulcrumResults, {
@@ -99,9 +123,10 @@ test('summary email reports bounded Fulcrum processing', () => {
     environmentLabel: 'PRODUCTION'
   });
 
-  assert.match(body, /Fulcrum stopped early: reached Fulcrum action limit \(25\)/);
+  assert.match(body, /Operational Notes/);
+  assert.match(body, /Fulcrum stopped before exhausting all pages: reached Fulcrum time budget/);
   assert.equal(emailContext.fulcrum.stoppedEarly, true);
-  assert.equal(emailContext.fulcrum.stopReason, 'reached Fulcrum action limit (25)');
+  assert.equal(emailContext.fulcrum.stopReason, 'reached Fulcrum time budget');
 });
 
 test('Fulcrum run options reserve Lambda time for QBO', () => {
@@ -126,6 +151,18 @@ test('Fulcrum run options reserve Lambda time for QBO', () => {
   assert.equal(options.safetyBufferMs, 15000);
   assert.ok(options.stopAtEpochMs >= before + 480000);
   assert.ok(options.stopAtEpochMs <= after + 480000);
+});
+
+test('Fulcrum run options do not default to an action cap', () => {
+  const options = buildFulcrumRunOptions(
+    {},
+    {
+      getRemainingTimeInMillis: () => 900000
+    }
+  );
+
+  assert.equal(options.maxActionAttempts, null);
+  assert.equal(options.maxPages, 20);
 });
 
 test('invocation lock metadata expires after remaining runtime plus buffer', () => {
@@ -179,6 +216,18 @@ test('customer skip policy distinguishes explicit exclusions from allowlist miss
   });
 
   assert.deepEqual(customerModule.getSkipPolicy('Johnson Controls Fire Protection LP'), {
+    shouldSkip: false,
+    skipCategory: null,
+    reason: null
+  });
+
+  assert.deepEqual(customerModule.getSkipPolicy('Colec LLC'), {
+    shouldSkip: false,
+    skipCategory: null,
+    reason: null
+  });
+
+  assert.deepEqual(customerModule.getSkipPolicy('World Security & Control'), {
     shouldSkip: false,
     skipCategory: null,
     reason: null

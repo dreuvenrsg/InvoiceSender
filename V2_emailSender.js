@@ -153,14 +153,61 @@ const config = {
     , 'JIMS MACHINE', 'SIGNAL SOURCE', 'CONTINENTAL ALARM & DET. /NE'
     , 'IRL SYSTEMS', 'R.B. ALLEN CO', 'Best System Sales'
     , 'HLI Solutions, Inc.', 'BRONCO FIRE ALARM SYS.', 'Servo Dynamics Engineering Co., LTD'
+    , 'Federal Signal', 'Akos Fire Protection DBA Wiring Solutions Electrical', 'WJS INC'
+    , 'Colec LLC', 'World Security & Control'
   ]
 };
 
 // Email notification module
+function formatMinutes(secondsValue) {
+  const seconds = Number(secondsValue || 0);
+  return `${((Number.isFinite(seconds) ? seconds : 0) / 60).toFixed(1)} min`;
+}
+
+function chunkValues(values, chunkSize = 10) {
+  const chunks = [];
+  for (let i = 0; i < values.length; i += chunkSize) {
+    chunks.push(values.slice(i, i + chunkSize));
+  }
+  return chunks;
+}
+
+function formatInvoiceIdentifier(detail = {}) {
+  return detail.invoiceNumber || detail.invoiceId || 'Unknown invoice';
+}
+
+function groupDetailsByCustomer(details = []) {
+  const groups = new Map();
+  for (const detail of details) {
+    const customer = String(detail.customer || 'Unknown customer').trim();
+    const existing = groups.get(customer) || [];
+    existing.push(formatInvoiceIdentifier(detail));
+    groups.set(customer, existing);
+  }
+  return [...groups.entries()]
+    .sort((a, b) => a[0].localeCompare(b[0]))
+    .map(([customer, invoices]) => ({ customer, invoices }));
+}
+
+function normalizeErrorText(rawError) {
+  const errorText = String(rawError || '').trim();
+  if (!errorText.startsWith('{')) return errorText;
+
+  try {
+    const parsed = JSON.parse(errorText);
+    if (parsed && typeof parsed.message === 'string') {
+      return parsed.message.trim();
+    }
+  } catch {
+    // Leave non-JSON or partially formatted errors unchanged.
+  }
+
+  return errorText;
+}
+
 function buildSummaryEmailContent(results, fulcrumResults = null, { now = new Date(), environmentLabel = activeConfig === config.sandbox ? 'SANDBOX' : 'PRODUCTION' } = {}) {
   const dateStr = now.toISOString().split("T")[0];
   const metrics = logger.getMetrics();
-  const subject = `QBO Invoice Processing Summary on ${dateStr} - ${results.sent} sent, ${results.skipped} skipped, ${results.errors} errors [${metrics.totalTime}s]`;
   const details = results?.details || [];
   const candidatePolicySummary = results?.candidatePolicySummary || {
     candidateInvoiceCount: 0,
@@ -188,6 +235,95 @@ function buildSummaryEmailContent(results, fulcrumResults = null, { now = new Da
     d => d.status === 'skipped'
   );
 
+  const allowlistMissDetails = details.filter(
+    d => d.status === 'skipped' && d.skipCategory === 'allowlist_miss'
+  );
+  const explicitExclusionDetails = details.filter(
+    d => d.status === 'skipped' && d.skipCategory === 'explicit_exclusion'
+  );
+  const errorDetails = details.filter(d => d.status === 'error');
+
+  const missingEmailErrors = [];
+  const shipmentIssues = [];
+  const systemErrors = [];
+  const otherProgramErrors = [];
+
+  for (const detail of errorDetails) {
+    const errorText = normalizeErrorText(detail.error);
+    const missingEmailMatch = errorText.match(/^Customer (.+) has no primary email defined$/);
+    if (missingEmailMatch) {
+      missingEmailErrors.push({
+        ...detail,
+        customer: missingEmailMatch[1]
+      });
+      continue;
+    }
+
+    if (detail.invoiceId === 'SYSTEM' || /^Fatal system error:/i.test(errorText)) {
+      systemErrors.push({
+        ...detail,
+        error: errorText
+      });
+      continue;
+    }
+
+    if (/No shipments found/i.test(errorText)) {
+      shipmentIssues.push({
+        ...detail,
+        error: errorText
+      });
+      continue;
+    }
+
+    otherProgramErrors.push({
+      ...detail,
+      error: errorText
+    });
+  }
+
+  const actionableSections = [
+    {
+      title: 'Add customers to allowlist (these invoices were skipped because the customer is not yet approved to receive invoices)',
+      entries: groupDetailsByCustomer(allowlistMissDetails).map(({ customer, invoices }) =>
+        `${customer}: ${invoices.join(', ')}`
+      )
+    },
+    {
+      title: 'Add missing customer email addresses in QBO',
+      entries: groupDetailsByCustomer(missingEmailErrors).map(({ customer, invoices }) =>
+        `${customer}: ${invoices.join(', ')}`
+      )
+    },
+    {
+      title: 'Review shipment issues',
+      entries: shipmentIssues.map(detail =>
+        `${formatInvoiceIdentifier(detail)}: ${detail.error}`
+      )
+    },
+    {
+      title: 'Review other program errors',
+      entries: otherProgramErrors.map(detail =>
+        `${formatInvoiceIdentifier(detail)}: ${detail.error}`
+      )
+    },
+    {
+      title: 'Review unexpected system errors',
+      entries: systemErrors.map(detail =>
+        `${formatInvoiceIdentifier(detail)}: ${detail.error}`
+      )
+    },
+    {
+      title: 'Fulcrum issues',
+      entries: (fulcrumResults?.errors || []).map(error => String(error))
+    }
+  ].filter(section => section.entries.length > 0);
+
+  const actionItemCount = actionableSections.reduce((count, section) => count + section.entries.length, 0);
+  const subject = `Invoice Run Summary on ${dateStr} - ${results.sent} sent, ${actionItemCount} need attention [${formatMinutes(metrics.totalTime)}]`;
+
+  const processedSoNumbers = (fulcrumResults?.processedInvoices || []).map(inv => `SO${inv.soNumber}`);
+  const sentDetails = details.filter(d => d.status === 'sent');
+
   const emailContext = {
     subject,
     qbo: {
@@ -198,7 +334,8 @@ function buildSummaryEmailContent(results, fulcrumResults = null, { now = new Da
       skippedCustomers,
       explicitlyExcludedCustomers,
       allowlistMissCustomers,
-      candidatePolicySummary
+      candidatePolicySummary,
+      actionItemCount
     },
     fulcrum: fulcrumResults ? {
       processed: fulcrumResults.processedInvoices?.length ?? 0,
@@ -208,102 +345,70 @@ function buildSummaryEmailContent(results, fulcrumResults = null, { now = new Da
     } : null
   };
 
-  let body = "";
+  const bodyLines = [
+    'Invoice Processing Summary',
+    '==========================',
+    `Date: ${now.toISOString()}`,
+    `Environment: ${environmentLabel}`,
+    ''
+  ];
+
+  if (actionableSections.length > 0) {
+    bodyLines.push('ACTION REQUIRED', '==============='); 
+    actionableSections.forEach((section, index) => {
+      bodyLines.push(`${index + 1}. ${section.title}`);
+      section.entries.forEach(entry => bodyLines.push(`- ${entry}`));
+      bodyLines.push('');
+    });
+  } else {
+    bodyLines.push('ACTION REQUIRED', '===============', 'No operator action required.', '');
+  }
+
+  bodyLines.push('COMPLETED THIS RUN', '==================');
   if (fulcrumResults) {
-    body = `
-        Fulcrum Sending Results
-        ========================
-        ${fulcrumResults.processedInvoices.length} invoices processed
-        ${fulcrumResults.errors.length} errors
-        ${fulcrumResults.stoppedEarly ? `Fulcrum stopped early: ${fulcrumResults.stopReason}` : 'Fulcrum completed all available pages'}
-        The errors are: ${fulcrumResults.errors}
-        
-      `;
-    if (fulcrumResults.processedInvoices.length > 0) {
-      body += 'Processed Invoices:\n';
-      fulcrumResults.processedInvoices.forEach(inv => {
-        body += `- SO ${inv.soNumber}: ${inv.action} (Balance: $${inv.balance}, Total: $${inv.total})\n`;
-      });
-      body += '\n';
-    }
+    bodyLines.push(`- Fulcrum: ${fulcrumResults.processedInvoices.length} invoices created and issued`);
+    bodyLines.push(`- Fulcrum errors: ${fulcrumResults.errors.length}`);
+  }
+  bodyLines.push(`- QBO: ${results.sent} invoices sent successfully`);
+  if (explicitExclusionDetails.length > 0) {
+    bodyLines.push(`- Explicit exclusions honored: ${explicitlyExcludedCustomers.join(', ')}`);
+  }
+  bodyLines.push('');
 
-    if (fulcrumResults.errors.length > 0) {
-      body += '\n⚠️ FULCRUM ERRORS:\n';
-      fulcrumResults.errors.forEach(err => {
-        body += `- ${err}\n`;
-      });
-      body += '\n';
-    }
+  if (processedSoNumbers.length > 0) {
+    bodyLines.push('Processed SOs', '=============');
+    chunkValues(processedSoNumbers, 10).forEach(chunk => bodyLines.push(`- ${chunk.join(', ')}`));
+    bodyLines.push('');
   }
 
-  body += `
-      QBO Invoice Processing Summary
-      ==============================
-      Date: ${now.toISOString()}
-      Environment: ${environmentLabel}
-
-      Performance Metrics:
-      -------------------
-      Total runtime: ${metrics.totalTime}s
-      Fulcrum stage: ${metrics.fulcrumTime || '0'}s
-      QBO stage: ${metrics.qboTime || '0'}s
-      Email stage: ${metrics.emailTime || '0'}s
-      ${results.parallelProcessingMetrics ? `Parallel processing: ${results.parallelProcessingMetrics.totalBatches} batches, avg ${results.parallelProcessingMetrics.avgBatchTime}s/batch` : ''}
-      ${metrics.retryCount > 0 ? `Retries performed: ${metrics.retryCount}` : ''}
-
-      Results:
-      --------
-      Total processed: ${results.processed}
-      Successfully sent: ${results.sent}
-      Skipped (policy): ${results.skipped}
-      Explicitly excluded customers: {${explicitlyExcludedCustomers.length ? explicitlyExcludedCustomers.join(', ') : 'None'}}
-      Customers skipped because not in allowlist: {${allowlistMissCustomers.length ? allowlistMissCustomers.join(', ') : 'None'}}
-      All skipped customers: {${skippedCustomers.length ? skippedCustomers.join(', ') : 'None'}}
-      Errors: ${results.errors}
-
-    `;
-
-  body += `
-      Candidate Customer Policy Snapshot
-      ---------------------------------
-      Candidate invoices before processing: ${candidatePolicySummary.candidateInvoiceCount}
-      Unique candidate customers: ${candidatePolicySummary.uniqueCustomerCount}
-      Sendable customers considered: {${candidatePolicySummary.sendableCustomers.length ? candidatePolicySummary.sendableCustomers.join(', ') : 'None'}}
-      Explicitly excluded customers considered: {${candidatePolicySummary.explicitlyExcludedCustomers.length ? candidatePolicySummary.explicitlyExcludedCustomers.join(', ') : 'None'}}
-      Customers considered but not in allowlist: {${candidatePolicySummary.allowlistMissCustomers.length ? candidatePolicySummary.allowlistMissCustomers.join(', ') : 'None'}}
-
-    `;
-
-  if (results.sent > 0) {
-    body += '\nSuccessfully Sent:\n';
-    results.details
-      .filter(d => d.status === 'sent')
-      .forEach(d => {
-        body += `- Invoice ${d.invoiceNumber}: sent to ${d.email}\n`;
-      });
+  if (sentDetails.length > 0) {
+    bodyLines.push('Invoices Sent', '=============');
+    sentDetails.forEach(detail => {
+      bodyLines.push(`- ${detail.invoiceNumber}: sent to ${detail.email}`);
+    });
+    bodyLines.push('');
   }
 
-  if (results.skipped > 0) {
-    body += '\n\n\nSkipped:\n\n';
-    results.details
-      .filter(d => d.status === 'skipped')
-      .forEach(d => {
-        body += `- Skipped invoice: ${d.invoiceId} for customer: ${d.customer} and was skipped because category: ${d.skipCategory || 'unknown'} and reason: ${d.reason}\n`;
-      });
+  if (fulcrumResults?.stoppedEarly && fulcrumResults.stopReason) {
+    bodyLines.push('Operational Notes', '=================');
+    bodyLines.push(`- Fulcrum stopped before exhausting all pages: ${fulcrumResults.stopReason}`);
+    bodyLines.push('');
   }
 
-  if (results.errors > 0) {
-    body += '\n\n\n ERROR DETAILS:\n\n';
-    results.details
-      .filter(d => d.status === 'error')
-      .forEach(d => {
-        body += `- Error with invoice: ${d.invoiceId} with error: ${d.error}\n`;
-      });
+  bodyLines.push('Run Metrics', '===========');
+  bodyLines.push(`- Total runtime: ${formatMinutes(metrics.totalTime)}`);
+  bodyLines.push(`- Fulcrum stage: ${formatMinutes(metrics.fulcrumTime)}`);
+  bodyLines.push(`- QBO stage: ${formatMinutes(metrics.qboTime)}`);
+  if (results.parallelProcessingMetrics) {
+    bodyLines.push(`- Parallel QBO: ${results.parallelProcessingMetrics.totalBatches} batches, avg ${results.parallelProcessingMetrics.avgBatchTime}s/batch`);
+  }
+  if (metrics.retryCount > 0) {
+    bodyLines.push(`- Retries performed: ${metrics.retryCount}`);
   }
 
   return {
     subject,
-    body,
+    body: `${bodyLines.join('\n').trim()}\n`,
     skippedCustomers,
     explicitlyExcludedCustomers,
     allowlistMissCustomers,
@@ -1999,7 +2104,7 @@ function buildFulcrumRunOptions(event = {}, context = null) {
       event?.fulcrumMaxProcessedInvoices ??
       process.env.FULCRUM_MAX_ACTIONS ??
       process.env.FULCRUM_MAX_PROCESSED_INVOICES,
-    25
+    null
   );
   const maxPages = parsePositiveIntegerOption(event?.fulcrumMaxPages ?? process.env.FULCRUM_MAX_PAGES, 20);
   const requestedBudgetMs = parsePositiveIntegerOption(event?.fulcrumStageBudgetMs ?? process.env.FULCRUM_STAGE_BUDGET_MS, 480000);
