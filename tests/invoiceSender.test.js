@@ -2,7 +2,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 
 import { isCreateDetailTimeoutError } from '../fulcrumProcessor.js';
-import { buildFulcrumRunOptions, buildInvocationLockMetadata, buildSummaryEmailContent, customerModule, utils } from '../V2_emailSender.js';
+import { buildFulcrumRunOptions, buildInvocationLockMetadata, buildSummaryEmailContent, customerModule, utils, resolveAuditRange, buildAuditReportEmail, buildAuditAllClearEmail } from '../V2_emailSender.js';
 
 test('summary email separates explicit exclusions from allowlist misses', () => {
   const results = {
@@ -165,6 +165,26 @@ test('Fulcrum run options do not default to an action cap', () => {
   assert.equal(options.maxPages, 20);
 });
 
+test('Fulcrum run options expose a parallel worker count', () => {
+  // Default: proven serial path (parallel is opt-in until validated in Lambda).
+  const defaults = buildFulcrumRunOptions({}, { getRemainingTimeInMillis: () => 900000 });
+  assert.equal(defaults.workerCount, 1);
+
+  // Event override wins and must be a positive integer.
+  const overridden = buildFulcrumRunOptions(
+    { fulcrumWorkers: 6 },
+    { getRemainingTimeInMillis: () => 900000 }
+  );
+  assert.equal(overridden.workerCount, 6);
+
+  // Invalid override falls back to the default rather than 0/NaN.
+  const invalid = buildFulcrumRunOptions(
+    { fulcrumWorkers: 0 },
+    { getRemainingTimeInMillis: () => 900000 }
+  );
+  assert.equal(invalid.workerCount, 1);
+});
+
 test('invocation lock metadata expires after remaining runtime plus buffer', () => {
   const metadata = buildInvocationLockMetadata(
     {
@@ -227,11 +247,15 @@ test('customer skip policy distinguishes explicit exclusions from allowlist miss
     reason: null
   });
 
-  assert.deepEqual(customerModule.getSkipPolicy('World Security & Control'), {
+  // Exact QBO DisplayName is allowlisted...
+  assert.deepEqual(customerModule.getSkipPolicy('WORLD SECURITY & CONTROL,INC.'), {
     shouldSkip: false,
     skipCategory: null,
     reason: null
   });
+
+  // ...but the old partial form no longer matches (exact match, not substring).
+  assert.equal(customerModule.getSkipPolicy('World Security & Control').shouldSkip, true);
 });
 
 test('candidate policy summary reports sendable and skipped customer groups', () => {
@@ -312,4 +336,90 @@ test('non-HLI invoices default to normalized customer primary email set', () => 
 
   assert.equal(selection.recipients, 'ap@summitcompanies.com, apvendorinquiry@summitfire.com');
   assert.equal(selection.source, 'customer_primary_email');
+});
+
+test('monthly audit resolves the previous calendar month (with year rollover + override)', () => {
+  assert.deepEqual(
+    resolveAuditRange({}, new Date('2026-07-01T08:00:00Z')),
+    { start: '2026-06-01', end: '2026-06-30', label: 'June 2026' }
+  );
+  const dec = resolveAuditRange({}, new Date('2026-01-10T00:00:00Z'));
+  assert.equal(dec.start, '2025-12-01');
+  assert.equal(dec.end, '2025-12-31');
+  assert.equal(dec.label, 'December 2025');
+  assert.deepEqual(
+    resolveAuditRange({ auditStart: '2026-05-01', auditEnd: '2026-05-31' }, new Date('2026-07-01T00:00:00Z')),
+    { start: '2026-05-01', end: '2026-05-31', label: '2026-05-01 to 2026-05-31' }
+  );
+});
+
+test('monthly audit email builders: all-clear vs report with leaks + QBO links', () => {
+  const clear = buildAuditAllClearEmail('June 2026');
+  assert.match(clear.subject, /all clear for June 2026/i);
+  assert.match(clear.html, /All clear/i);
+  assert.match(clear.html, /went to the right location/i);
+  assert.match(clear.html, /Excellence/);
+
+  const rep = buildAuditReportEmail({
+    total: 1, scanned: 10,
+    leaks: [{ doc: 'F10006', id: '215001', customer: 'SIEMENS INDUSTRY INC', sentTo: 'x@siemens.com' }],
+    groups: [{ customer: 'SIEMENS INDUSTRY INC', cat: 'LEAK', explanation: 'verify', items: [{ doc: 'F10006', id: '215001' }] }]
+  }, 'May 2026');
+  assert.match(rep.subject, /1 leak/);
+  assert.match(rep.html, /should NOT have received/);
+  assert.match(rep.html, /qbo\.intuit\.com\/app\/invoice\?txnId=215001/);
+});
+
+test('allowlist matches exact QBO name (case-insensitive), not substring', () => {
+  // Exact approved name -> sendable
+  assert.equal(customerModule.getSkipPolicy('HOCHIKI').shouldSkip, false);
+  // Case-insensitive
+  assert.equal(customerModule.getSkipPolicy('hochiki').shouldSkip, false);
+  assert.equal(customerModule.getSkipPolicy('Empire Fire Alarm Specialist Co., Inc').shouldSkip, false);
+  assert.equal(customerModule.getSkipPolicy('  ANIXTER  ').shouldSkip, false); // trimmed
+
+  // Over-match cases are now resolved: the OTHER entity is NOT allowlisted.
+  const hochikiVes = customerModule.getSkipPolicy('HOCHIKI/VES');
+  assert.equal(hochikiVes.shouldSkip, true);
+  assert.equal(hochikiVes.skipCategory, 'allowlist_miss');
+  assert.equal(customerModule.getSkipPolicy('ANIXTER CANADA INC.').shouldSkip, true);
+
+  // A substring of an approved name must NOT match (the old danger).
+  assert.equal(customerModule.getSkipPolicy('Potter').shouldSkip, true); // exact is "POTTER ELECTRIC"
+  assert.equal(customerModule.getSkipPolicy('Some Unapproved Customer LLC').shouldSkip, true);
+
+  // Exclusions still win and still use substring.
+  const honeywell = customerModule.getSkipPolicy('HONEYWELL FIRE SYSTEMS, US');
+  assert.equal(honeywell.shouldSkip, true);
+  assert.equal(honeywell.skipCategory, 'explicit_exclusion');
+});
+
+test('summary email renders helpful error messages and never surfaces a bare "{}"', () => {
+  const results = {
+    processed: 3,
+    sent: 0,
+    skipped: 0,
+    errors: 3,
+    details: [
+      {
+        invoiceId: 'F10178',
+        status: 'error',
+        error: '[Fulcrum] Could not determine a trackingNumber: QBO Invoice Id: 223356 /QBO Invoice: F10178'
+      },
+      // Legacy bug payload: an Error JSON.stringify'd to "{}" must not reach the operator as "{}".
+      { invoiceId: 'F10225', status: 'error', error: '{}' },
+      // Error instances must be unwrapped to their message (the Fulcrum 500 timeout case).
+      { invoiceId: 'F10204', status: 'error', error: new Error('Fulcrum API error: 500 - Execution Timeout Expired') }
+    ]
+  };
+
+  const { body } = buildSummaryEmailContent(results, null, {
+    now: new Date('2026-06-09T12:00:00.000Z'),
+    environmentLabel: 'PRODUCTION'
+  });
+
+  assert.match(body, /Review other program errors/);
+  assert.match(body, /Could not determine a trackingNumber/);
+  assert.match(body, /Fulcrum API error: 500 - Execution Timeout Expired/);
+  assert.ok(!body.includes('{}'), 'summary body must never contain a bare "{}"');
 });

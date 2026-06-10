@@ -133,28 +133,86 @@ const config = {
   
   // Business rules
   EXCLUDED_CUSTOMERS: ['siemens', 'honeywell'], // case-insensitive
-  INCLUDED_CUSTOMERS: ['Hochiki', 'Johnson Controls Fire Protection LP', 'Anixter'
-    , 'Tyco Fire & Security GmbH', 'Potter', 'Hager', 'HC Integrated Systems', 'Mass Merchandising'
-    , 'MIRCOM TECHNOLOGIES, LTD', 'Prudential Lighting', 'SYSTEMS DEPOT', 'Commonwealth Lock Co.',
-    'CONVERGINT TECHNOLOGIES LLC', 'Tyco Safety Products Canada Ltd', 'SECURITY DOOR CONTROL',
-    'Doorking', 'Alarmax', 'ASSOCIATED FIRE PROTECTION', 'VES FIRE DETECTION SYSTEMS', '3S INCORPORATED'
-    , 'ADI/TEXAS', 'Fire Device Company', 'Dortronics', 'MAMMOTH FIRE', 'Main Fire & Security'
-    , 'DOORTEK SYSTEMS', 'BROOKS EQUIPMENT CO.', 'Killark', 'EZ Fire Inc', 'MONACO ENTERPRISES'
-    , 'HIGH RISE PROTECTION', 'US ALARM & DETECTION SUPPLY, LLC', 'FIKE CORPORATION'
-    , 'HUBBELL CARIBE LIMITED', 'Life Safety Consultants', 'FIRE ALARM.COM', 'UNICOM INC.'
-    , 'OMLID & SWINNEY', 'MADISON SERVICE CORP.', 'SECURE DOOR & HARDWARE'
-    , 'TOMCO SYSTEMS', 'RAVEL ELECTRONICS PVT LTD', 'TOTAL DOOR, AN OPENINGS COMPANY'
-    , 'SECURITY DATA SUPPLY, LLC', 'MIRCOM INC.', 'Casey Fire Systems, Inc'
-    , 'TSS INTEGRATED SYSTEMS', 'Interlog Corporation', 'DOOR SYSTEMS INC.'
-    , 'ACCESS HARDWARE', 'GENERAL MONITORS SYSTEMS', 'SYSTEM DISTRIBUTORS'
-    , 'CB Doors and Hardware, Inc.', 'Kidde Edwards', 'CHUBB-EDWARDS CANADA'
-    , 'SECURITY WHOLESALERS INC.', 'TOMAR ELECTRONICS, INC', 'AUTOMATIC BUILDING CONTROLS'
-    , 'KIDDE FENWAL INC', 'APS Fire Co', 'SAFETY STORAGE INC.', 'JM ELECTRONIC ENGINEERING INC.'
-    , 'JIMS MACHINE', 'SIGNAL SOURCE', 'CONTINENTAL ALARM & DET. /NE'
-    , 'IRL SYSTEMS', 'R.B. ALLEN CO', 'Best System Sales'
-    , 'HLI Solutions, Inc.', 'BRONCO FIRE ALARM SYS.', 'Servo Dynamics Engineering Co., LTD'
-    , 'Federal Signal', 'Akos Fire Protection DBA Wiring Solutions Electrical', 'WJS INC'
-    , 'Colec LLC', 'World Security & Control'
+  // Allowlist of approved customers, matched by EXACT (case-insensitive) QBO DisplayName.
+  // These are the verified exact QBO names (reconciled 2026-06-10 against the live customer
+  // list). Do NOT use partial/substring values here — matching is exact (see getSkipPolicy).
+  // EXCLUDED_CUSTOMERS above intentionally stays substring (broad safety net).
+  INCLUDED_CUSTOMERS: [
+    'Johnson Controls Fire Protection LP',
+    'Tyco Fire & Security GmbH',
+    'POTTER ELECTRIC',
+    'HAGER COMPANIES',
+    'HC INTEGRATED SYSTEMS',
+    'Mass Merchandising',
+    'MIRCOM TECHNOLOGIES, LTD',
+    'Prudential Lighting',
+    'The Systems Depot',
+    'Commonwealth Lock Co.',
+    'CONVERGINT TECHNOLOGIES LLC',
+    'Tyco Safety Products Canada Ltd',
+    'SECURITY DOOR CONTROL',
+    'Doorking',
+    'ALARMAX',
+    'ASSOCIATED FIRE PROTECTION',
+    'VES FIRE DETECTION SYSTEMS',
+    '3S INCORPORATED',
+    'ADI/TEXAS',
+    'Fire Device Company',
+    'Dortronics',
+    'MAMMOTH FIRE',
+    'Main Fire & Security',
+    'DOORTEK SYSTEMS',
+    'BROOKS EQUIPMENT CO.',
+    'KILLARK',
+    'EZ Fire Inc',
+    'MONACO ENTERPRISES',
+    'HIGH RISE PROTECTION',
+    'US ALARM & DETECTION SUPPLY, LLC',
+    'FIKE CORPORATION',
+    'HUBBELL CARIBE LIMITED',
+    'Life Safety Consultants',
+    'FIRE ALARM.COM',
+    'UNICOM INC.',
+    'OMLID & SWINNEY',
+    'MADISON SERVICE CORP.',
+    'SECURE DOOR & HARDWARE',
+    'TOMCO SYSTEMS',
+    'RAVEL ELECTRONICS PVT LTD',
+    'TOTAL DOOR, AN OPENINGS COMPANY',
+    'SECURITY DATA SUPPLY, LLC',
+    'MIRCOM INC.',
+    'Casey Fire Systems, Inc',
+    'TSS INTEGRATED SYSTEMS',
+    'Interlog Corporation',
+    'DOOR SYSTEMS INC.',
+    'ACCESS HARDWARE',
+    'GENERAL MONITORS SYSTEMS',
+    'SYSTEM DISTRIBUTORS',
+    'CB Doors and Hardware, Inc.',
+    'Kidde Edwards',
+    'CHUBB-EDWARDS CANADA',
+    'TOMAR ELECTRONICS, INC.',
+    'AUTOMATIC BUILDING CONTROLS',
+    'KIDDE FENWAL INC',
+    'SAFETY STORAGE INC.',
+    'JM ELECTRONIC ENGINEERING INC.',
+    'JIMS MACHINE',
+    'SIGNAL SOURCE',
+    'CONTINENTAL ALARM & DET. /NE',
+    'IRL SYSTEMS',
+    'R.B. ALLEN CO.',
+    'Best System Sales',
+    'HLI Solutions, Inc.',
+    'BRONCO FIRE ALARM SYS.',
+    'Servo Dynamics Engineering Co., LTD',
+    'Federal Signal',
+    'Akos Fire Protection DBA Wiring Solutions Electrical',
+    'WJS INC',
+    'Colec LLC',
+    'WORLD SECURITY & CONTROL,INC.',
+    'Empire Fire Alarm Specialist Co., Inc',
+    'HOCHIKI',
+    'ANIXTER'
   ]
 };
 
@@ -190,13 +248,32 @@ function groupDetailsByCustomer(details = []) {
 }
 
 function normalizeErrorText(rawError) {
-  const errorText = String(rawError || '').trim();
+  if (rawError == null) return '';
+
+  // Error instances / plain objects: prefer .message (JSON.stringify would drop it).
+  if (typeof rawError === 'object') {
+    if (typeof rawError.message === 'string' && rawError.message.trim()) {
+      return normalizeErrorText(rawError.message);
+    }
+    try {
+      const s = JSON.stringify(rawError);
+      return s && s !== '{}' ? s : '';
+    } catch {
+      return '';
+    }
+  }
+
+  const errorText = String(rawError).trim();
   if (!errorText.startsWith('{')) return errorText;
 
   try {
     const parsed = JSON.parse(errorText);
     if (parsed && typeof parsed.message === 'string') {
       return parsed.message.trim();
+    }
+    // Parsed JSON with no usable message (e.g. "{}") — don't surface a useless "{}".
+    if (parsed && typeof parsed === 'object' && Object.keys(parsed).length === 0) {
+      return '';
     }
   } catch {
     // Leave non-JSON or partially formatted errors unchanged.
@@ -870,13 +947,17 @@ const customerModule = {
       };
     }
     
-    const lowerName = customerName.toLowerCase();
-    const isExcluded = config.EXCLUDED_CUSTOMERS.some(excluded => 
+    const lowerName = customerName.trim().toLowerCase();
+    // Exclusions stay substring (broad safety net for any Siemens/Honeywell entity).
+    const isExcluded = config.EXCLUDED_CUSTOMERS.some(excluded =>
       lowerName.includes(excluded.toLowerCase())
     );
 
-    const isIncluded = config.INCLUDED_CUSTOMERS.some(cust_name => 
-      lowerName.includes(cust_name.toLowerCase())
+    // Allowlist is EXACT (case-insensitive) match against the QBO DisplayName, so a short
+    // approved name can never accidentally allowlist a different customer (e.g. "ANIXTER"
+    // must not pull in "ANIXTER CANADA INC.").
+    const isIncluded = config.INCLUDED_CUSTOMERS.some(cust_name =>
+      lowerName === cust_name.trim().toLowerCase()
     );
     
     if (isExcluded) {
@@ -1198,8 +1279,11 @@ const externalDataModule = {
       };
 
     } catch (err) {
-      console.error('[Fulcrum] Error in fetchExternalDataForInvoice:', err.message);
-      throw({message: JSON.stringify(err)});
+      // Preserve the real message. Error instances JSON.stringify to "{}" (message/stack
+      // are non-enumerable), which is why summary emails previously showed "F10225: {}".
+      const message = (err && err.message) ? err.message : String(err);
+      console.error('[Fulcrum] Error in fetchExternalDataForInvoice:', message);
+      throw new Error(message);
     }
   },
 
@@ -1554,7 +1638,7 @@ const externalDataModule = {
 
   // ---------- LOW-LEVEL FETCH ----------
 
-async fulcrumRequest(method, endpoint, body = null) {
+async fulcrumRequest(method, endpoint, body = null, { maxAttempts = 3, baseDelayMs = 600 } = {}) {
     const url = `${this.fulcrumBaseUrl}${endpoint}`;
     const headers = {
     'Accept': 'application/json',
@@ -1568,10 +1652,36 @@ async fulcrumRequest(method, endpoint, body = null) {
     console.log(`[Fulcrum] ${method} ${endpoint}`);
     if (body) console.log(`[Fulcrum] Request body:`, JSON.stringify(body, null, 2));
 
-    const res = await fetch(url, options);
-    const txt = await res.text();
-    if (!res.ok) throw new Error(`Fulcrum API error: ${res.status} - ${txt}`);
-    return txt ? JSON.parse(txt) : {};
+    // Fulcrum's API intermittently returns 5xx (e.g. "Execution Timeout Expired") or
+    // drops the connection. Retry transient failures with linear backoff; fail fast on
+    // 4xx (real client errors like not-found, which retrying won't fix).
+    let lastErr;
+    for (let attempt = 1; attempt <= maxAttempts; attempt++) {
+      let res, txt;
+      try {
+        res = await fetch(url, options);
+        txt = await res.text();
+      } catch (networkErr) {
+        lastErr = networkErr;
+        if (attempt < maxAttempts) {
+          console.warn(`[Fulcrum] ${method} ${endpoint} network error (attempt ${attempt}/${maxAttempts}): ${networkErr.message}; retrying...`);
+          await new Promise(r => setTimeout(r, baseDelayMs * attempt));
+          continue;
+        }
+        throw networkErr;
+      }
+
+      if (res.ok) return txt ? JSON.parse(txt) : {};
+
+      lastErr = new Error(`Fulcrum API error: ${res.status} - ${txt}`);
+      if (res.status >= 500 && attempt < maxAttempts) {
+        console.warn(`[Fulcrum] ${method} ${endpoint} -> ${res.status} (attempt ${attempt}/${maxAttempts}); retrying...`);
+        await new Promise(r => setTimeout(r, baseDelayMs * attempt));
+        continue;
+      }
+      throw lastErr;
+    }
+    throw lastErr || new Error(`Fulcrum API error: exhausted retries for ${method} ${endpoint}`);
 }
 };
 
@@ -1929,10 +2039,13 @@ if (import.meta.url === `file://${process.argv[1]}`) {
       if (fulcrumUsername && fulcrumPassword) {
         console.log('🤖 Running Fulcrum processor (visible browser)...\n');
         logger.startStage('fulcrum');
+        const localFulcrumOptions = buildFulcrumRunOptions({}, null);
+        console.log('[Fulcrum] Run options (local):', JSON.stringify(localFulcrumOptions));
         fulcrumResults = await runFulcrumProcessor(
           fulcrumUsername,
           fulcrumPassword,
-          false // headless=false for local (visible browser)
+          false, // headless=false for local (visible browser)
+          localFulcrumOptions
         );
         logger.endStage('fulcrum');
         if (fulcrumResults) {
@@ -1987,7 +2100,10 @@ export {
   invoiceProcessor,
   buildSummaryEmailContent,
   buildFulcrumRunOptions,
-  buildInvocationLockMetadata
+  buildInvocationLockMetadata,
+  resolveAuditRange,
+  buildAuditReportEmail,
+  buildAuditAllClearEmail
 };
 
 // ---- utils: dates (add once) ----
@@ -2107,8 +2223,16 @@ function buildFulcrumRunOptions(event = {}, context = null) {
     null
   );
   const maxPages = parsePositiveIntegerOption(event?.fulcrumMaxPages ?? process.env.FULCRUM_MAX_PAGES, 20);
-  const requestedBudgetMs = parsePositiveIntegerOption(event?.fulcrumStageBudgetMs ?? process.env.FULCRUM_STAGE_BUDGET_MS, 480000);
-  const qboReserveMs = parsePositiveIntegerOption(event?.qboStageReserveMs ?? process.env.QBO_STAGE_RESERVE_MS, 360000);
+  // Parallel Fulcrum tabs. >1 issues invoices concurrently (correctness proven); the
+  // per-tab speedup is environment-dependent and must be validated in Lambda, so the
+  // default stays at the proven serial path. Override per-invoke with {fulcrumWorkers:N}
+  // or set FULCRUM_WORKERS to roll it out once measured.
+  const workerCount = parsePositiveIntegerOption(event?.fulcrumWorkers ?? process.env.FULCRUM_WORKERS, 1);
+  // With parallel issuing the Fulcrum stage clears far more per run, so give it the
+  // bulk of the 900s. It still exits early once the queue drains, handing the
+  // remaining time to the QBO send stage; qboReserveMs only bites if Fulcrum runs long.
+  const requestedBudgetMs = parsePositiveIntegerOption(event?.fulcrumStageBudgetMs ?? process.env.FULCRUM_STAGE_BUDGET_MS, 660000);
+  const qboReserveMs = parsePositiveIntegerOption(event?.qboStageReserveMs ?? process.env.QBO_STAGE_RESERVE_MS, 180000);
   const safetyBufferMs = parsePositiveIntegerOption(event?.lambdaSafetyBufferMs ?? process.env.LAMBDA_SAFETY_BUFFER_MS, 15000);
   const remainingMs = typeof context?.getRemainingTimeInMillis === 'function'
     ? context.getRemainingTimeInMillis()
@@ -2120,6 +2244,7 @@ function buildFulcrumRunOptions(event = {}, context = null) {
   return {
     maxActionAttempts,
     maxPages,
+    workerCount,
     stopAtEpochMs: Date.now() + budgetMs,
     budgetMs,
     qboReserveMs,
@@ -2223,8 +2348,149 @@ async function releaseInvocationLock(lock) {
   }
 }
 
+// =====================================================================
+// MONTHLY MIS-ROUTING AUDIT
+// Checks every invoice emailed in a month and reports any that went to an
+// address that is not (fully) on the customer's QBO profile. Runs on its own
+// monthly schedule via event { mode: 'monthlyMisrouteAudit' }.
+// =====================================================================
+const AUDIT_RECIPIENTS = (process.env.AUDIT_REPORT_EMAILS || 'ar@rsgsecurity.com')
+  .split(',').map(s => s.trim()).filter(Boolean);
+
+const auditAddrSet = s => new Set(String(s || '').toLowerCase().split(/[,;]/).map(x => x.trim()).filter(Boolean));
+const auditDomSet = s => new Set([...auditAddrSet(s)].map(a => a.split('@')[1] || ''));
+const auditEsc = s => String(s).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+const auditIsExcluded = name => config.EXCLUDED_CUSTOMERS.some(e => String(name || '').toLowerCase().includes(e.toLowerCase()));
+const qboLink = id => `https://qbo.intuit.com/app/invoice?txnId=${id}`;
+
+function resolveAuditRange(event = {}, now = new Date()) {
+  const fmt = d => d.toISOString().slice(0, 10);
+  if (event.auditStart && event.auditEnd) return { start: event.auditStart, end: event.auditEnd, label: `${event.auditStart} to ${event.auditEnd}` };
+  let y = now.getUTCFullYear(), m = now.getUTCMonth(); // current month (0-based)
+  if (event.auditMonth) { const [yy, mm] = event.auditMonth.split('-').map(Number); y = yy; m = mm; } // 'YYYY-MM' -> treat as the month AFTER target so prev = target
+  const start = new Date(Date.UTC(y, m - 1, 1));
+  const end = new Date(Date.UTC(y, m, 0)); // day 0 of current month = last day of previous month
+  const label = start.toLocaleString('en-US', { month: 'long', year: 'numeric', timeZone: 'UTC' });
+  return { start: fmt(start), end: fmt(end), label };
+}
+
+async function auditQueryAll(queryBase) {
+  const out = [];
+  let start = 1;
+  for (let page = 0; page < 50; page++) {
+    const resp = await qboAPI.query(`${queryBase} STARTPOSITION ${start} MAXRESULTS 1000`);
+    const key = Object.keys(resp).find(k => Array.isArray(resp[k]));
+    const rows = key ? resp[key] : [];
+    out.push(...rows);
+    if (rows.length < 1000) break;
+    start += 1000;
+  }
+  return out;
+}
+
+async function auditMisroutesForRange(start, end) {
+  const cust = {};
+  for (const active of ['true', 'false'])
+    for (const c of await auditQueryAll(`SELECT Id, DisplayName, PrimaryEmailAddr FROM Customer WHERE Active = ${active}`))
+      cust[c.Id] = { name: c.DisplayName, profile: c.PrimaryEmailAddr?.Address || '' };
+
+  const sent = (await auditQueryAll(`SELECT * FROM Invoice WHERE TxnDate >= '${start}' AND TxnDate <= '${end}'`))
+    .filter(i => i.EmailStatus === 'EmailSent');
+
+  const groups = {}; const leaks = []; let total = 0;
+  for (const inv of sent) {
+    const c = cust[inv.CustomerRef?.value] || { name: inv.CustomerRef?.name || 'Unknown', profile: '' };
+    const billed = inv.BillEmail?.Address || '';
+    const bSet = auditAddrSet(billed), pSet = auditAddrSet(c.profile);
+    if (bSet.size === pSet.size && [...bSet].every(a => pSet.has(a))) continue; // exact match
+    let cat;
+    if (!pSet.size) cat = 'NO-PROFILE';
+    else if ([...bSet].every(a => pSet.has(a))) continue;                     // subset of profile -> fine
+    else if (bSet.size === 1 && bSet.has('ar@rsgsecurity.com')) continue;     // safe to AR
+    else cat = [...auditDomSet(billed)].some(d => d && !auditDomSet(c.profile).has(d)) ? 'LEAK' : 'WRONG';
+
+    const item = { doc: inv.DocNumber, id: inv.Id };
+    if (auditIsExcluded(c.name)) leaks.push({ ...item, customer: c.name, sentTo: billed });
+    const extras = [...bSet].filter(a => !pSet.has(a));
+    let explanation;
+    if (cat === 'NO-PROFILE') explanation = `No email on the QBO profile &mdash; auto-sent to the Fulcrum address (${auditEsc(billed)}).`;
+    else if (cat === 'LEAK') explanation = `Sent to <b>${auditEsc(extras.join(', '))}</b> &mdash; a domain not on the profile (${auditEsc(c.profile)}). Verify recipient.`;
+    else explanation = `Sent to <b>${auditEsc(extras.join(', '))}</b> not on the profile (${auditEsc(c.profile || '(none)')}).`;
+    const key = `${c.name}|${billed}`;
+    (groups[key] ||= { customer: c.name, cat, explanation, items: [] }).items.push(item);
+    total++;
+  }
+  return { total, leaks, groups: Object.values(groups).sort((a, b) => b.items.length - a.items.length), scanned: sent.length };
+}
+
+function buildAuditReportEmail(audit, label) {
+  const link = i => `<a href="${qboLink(i.id)}">${auditEsc(i.doc)}</a>`;
+  const leakHtml = audit.leaks.length
+    ? `<div style="border:2px solid #c00;padding:8px 12px;background:#fff5f5">
+<h3 style="color:#c00;margin:4px 0">🚨 Sent to a party that should NOT have received the invoice</h3>
+<ul>${audit.leaks.map(l => `<li><b>${link(l)} &mdash; ${auditEsc(l.customer)}</b> was emailed to <b>${auditEsc(l.sentTo)}</b> (excluded customer).</li>`).join('')}</ul></div>`
+    : '';
+  const groupsHtml = audit.groups.map(g =>
+    `<div style="margin-bottom:10px;border-bottom:1px solid #eee;padding-bottom:6px">
+<b>[${g.cat}] ${auditEsc(g.customer)}</b> &mdash; ${g.items.length} invoice(s)<br>
+&nbsp;&nbsp;<span style="color:#444">${g.explanation}</span><br>
+&nbsp;&nbsp;${g.items.sort((a, b) => a.doc < b.doc ? 1 : -1).map(link).join(', ')}
+</div>`).join('');
+  const html = `<div style="font-family:Arial,sans-serif;font-size:13px;color:#222;line-height:1.5">
+<p>Monthly invoice-routing audit for <b>${auditEsc(label)}</b>. Checked ${audit.scanned} emailed invoices; <b>${audit.total}</b> went to an address not (fully) on the customer's QuickBooks profile. Each invoice links to QuickBooks.</p>
+${leakHtml}
+<h3>By customer</h3>
+${groupsHtml}
+<p style="color:#888;font-size:12px">Excludes invoices sent to one of the customer's configured addresses (just not all), and excluded-customer invoices that went to ar@rsgsecurity.com (safe).</p>
+</div>`;
+  return { subject: `Invoice routing audit — ${label}: ${audit.leaks.length} leak(s), ${audit.total} mis-route(s)`, html };
+}
+
+function buildAuditAllClearEmail(label) {
+  const html = `<div style="font-family:Arial,sans-serif;font-size:14px;color:#222;line-height:1.6;text-align:center;padding:16px">
+<div style="font-size:40px">🎯📬✅</div>
+<h2 style="color:#137333;margin:8px 0">All clear for ${auditEsc(label)}!</h2>
+<p><b>Every invoice we emailed last month went to the right location</b> &mdash; each one was delivered to the exact address configured on the customer's QuickBooks profile. No leaks, no wrong mailboxes, nothing to chase or correct.</p>
+<blockquote style="font-style:italic;color:#444;border-left:3px solid #137333;margin:18px auto;max-width:480px;padding:8px 16px;text-align:left">
+&ldquo;We are what we repeatedly do. Excellence, then, is not an act, but a habit.&rdquo;<br>
+<span style="color:#888;font-size:12px">&mdash; Aristotle</span>
+</blockquote>
+<p style="font-size:12px;color:#999">— The RSG Invoice Watchdog 🐶 (on patrol, monthly)</p>
+</div>`;
+  return { subject: `✅ Invoice routing audit — all clear for ${label}! 🎉`, html };
+}
+
+async function runMonthlyMisrouteAudit(event, context) {
+  const { start, end, label } = resolveAuditRange(event || {});
+  console.log(`[Audit] Monthly mis-route audit for ${label} (${start}..${end})`);
+  await oauth.initialize();
+  const audit = await auditMisroutesForRange(start, end);
+  console.log(`[Audit] ${label}: scanned ${audit.scanned}, ${audit.total} mis-routes, ${audit.leaks.length} leaks`);
+
+  const { subject, html } = audit.total > 0
+    ? buildAuditReportEmail(audit, label)
+    : buildAuditAllClearEmail(label);
+
+  // Recipients default to ar@ (env), but an event override allows safe test runs.
+  const recipients = Array.isArray(event?.auditRecipients) && event.auditRecipients.length
+    ? event.auditRecipients
+    : AUDIT_RECIPIENTS;
+  await sesClient.send(new SendEmailCommand({
+    Source: emailModule.fromEmail,
+    Destination: { ToAddresses: recipients },
+    Message: { Subject: { Data: subject, Charset: 'UTF-8' }, Body: { Html: { Data: html, Charset: 'UTF-8' } } }
+  }));
+  console.log(`[Audit] Report emailed to ${recipients.join(', ')}: "${subject}"`);
+  return { statusCode: 200, body: JSON.stringify({ mode: 'monthlyMisrouteAudit', range: { start, end, label }, misRoutes: audit.total, leaks: audit.leaks.length }) };
+}
+
 // Lambda handler
 export const handler = async (event, context) => {
+  // Monthly mis-routing audit runs as its own mode (no invoice processing / no run-lock).
+  if (event?.mode === 'monthlyMisrouteAudit') {
+    return await runMonthlyMisrouteAudit(event, context);
+  }
+
   console.log('[Lambda] Starting invoice processing...');
   
   let qboResults;
