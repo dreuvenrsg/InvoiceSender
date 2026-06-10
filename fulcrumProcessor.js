@@ -342,7 +342,10 @@ function createProcessingLimits(options = {}) {
   return {
     maxPages: parsePositiveInteger(options.maxPages) || DEFAULT_MAX_PAGES,
     maxActionAttempts: parsePositiveInteger(options.maxActionAttempts ?? options.maxProcessedInvoices),
-    stopAtEpochMs: parsePositiveInteger(options.stopAtEpochMs)
+    stopAtEpochMs: parsePositiveInteger(options.stopAtEpochMs),
+    // Number of parallel browser tabs ("workers") that issue invoices concurrently.
+    // 1 (default) uses the proven serial path; >1 enables the parallel worker pool.
+    workerCount: parsePositiveInteger(options.workerCount) || 1
   };
 }
 
@@ -1269,6 +1272,173 @@ async function checkNextPage(page) {
 }
 
 // Main function - run the entire process
+// ============================================================================
+// Parallel worker pool (Design B): W browser tabs share one authenticated
+// session and issue invoices concurrently. Invoices are URL-addressable only as
+// sales-order detail pages (no invoice-issue controls there), so each worker
+// drives the NEEDS ACTION list on its own tab and claims rows via a shared,
+// atomically-updated claim set. Issued invoices drop off the list (reflow); the
+// claim set prevents any two workers from taking the same SO.
+// ============================================================================
+
+// Create and prepare an extra tab in the existing (already authenticated) browser.
+async function createWorkerPage(browser) {
+  const page = await browser.newPage();
+  page.setDefaultNavigationTimeout(config.timeouts.navigation);
+  page.setDefaultTimeout(config.timeouts.elementWait);
+  await page.setRequestInterception(true);
+  page.on('request', (req) => {
+    const type = req.resourceType();
+    if (!IS_LOCAL && (type === 'image' || type === 'font')) req.abort();
+    else req.continue();
+  });
+  await page.setViewport({ width: 1920, height: 1080 });
+  return page;
+}
+
+// Land a tab on the NEEDS ACTION list, re-logging in if the shared session lapsed.
+async function gotoNeedsAction(page, username, password) {
+  await goToInvoicing(page);
+  if (page.url().includes('/login')) {
+    await login(page, username, password);
+    await goToInvoicing(page);
+  }
+  await clickNeedsAction(page);
+}
+
+// Scan the current list view and ATOMICALLY claim the first actionable, unclaimed
+// row. Permanently-skippable rows (refunds / failed validation) are added to the
+// claim set so no worker re-examines them. Returns a claim or null (none here).
+async function scanCurrentViewForClaim(page, shared) {
+  await page.waitForSelector('cdk-row', { visible: true, timeout: config.timeouts.elementWait }).catch(() => {});
+  const rows = await page.$$('cdk-row');
+  for (const row of rows) {
+    const rowData = await extractRowData(row);
+    if (!rowData || rowData.soNumber === 'Unknown') continue;
+    if (shared.claimedSet.has(rowData.soNumber)) continue;
+
+    const hasCreate = await row.evaluate(el =>
+      Array.from(el.querySelectorAll('button')).some(b => b.textContent.trim() === 'Create' && b.classList.contains('btn-primary')));
+    const hasIssue = await row.evaluate(el =>
+      Array.from(el.querySelectorAll('button')).some(b => b.textContent.trim() === 'Issue' && b.classList.contains('btn-primary')));
+
+    if (!hasCreate && !hasIssue) { shared.claimedSet.add(rowData.soNumber); continue; }
+    if (!shouldProcessRow(rowData.balance, rowData.total, rowData.hasRefund, hasCreate, hasIssue)) {
+      shared.claimedSet.add(rowData.soNumber); // permanent skip — stays on the list, never actionable
+      continue;
+    }
+
+    // Atomic claim: no `await` between the membership check and the add, so in
+    // single-threaded JS exactly one worker can win a given SO.
+    if (shared.claimedSet.has(rowData.soNumber)) continue;
+    shared.claimedSet.add(rowData.soNumber);
+
+    const pageNum = (await getPageInfo(page)).currentPageNum;
+    return { row, rowData, hasCreate, pageNum };
+  }
+  return null;
+}
+
+// Sweep from the current view forward through pages until a claim is found or the
+// last page is reached.
+async function findClaimForward(page, shared) {
+  while (true) {
+    if (getProcessingStopReason(shared.limits, shared.state)) return null;
+    const claim = await scanCurrentViewForClaim(page, shared);
+    if (claim) return claim;
+    const moved = await checkNextPage(page);
+    if (!moved) return null;
+  }
+}
+
+async function runFulcrumWorker(workerId, page, shared, username, password) {
+  console.log(`[Worker ${workerId}] started`);
+  let consecutiveNavFailures = 0;
+  while (true) {
+    const stop = getProcessingStopReason(shared.limits, shared.state);
+    if (stop) { if (!shared.state.stopReason) shared.state.stopReason = stop; break; }
+
+    // Find + claim the next row. Navigation/scan errors here must NOT reject the
+    // whole pool (Promise.all) — recover this tab and retry; give up only after
+    // repeated failures so one wedged tab can't spin forever.
+    let claim;
+    try {
+      // Try the current view forward first (cheap — no reload after a CREATE, which
+      // already returns this tab to the list). If that sweep is empty, reset to page
+      // 1 and sweep fully before concluding there is nothing to do.
+      claim = await findClaimForward(page, shared);
+      if (!claim) {
+        await gotoNeedsAction(page, username, password);
+        claim = await findClaimForward(page, shared);
+      }
+      consecutiveNavFailures = 0;
+    } catch (navErr) {
+      consecutiveNavFailures++;
+      console.error(`[Worker ${workerId}] navigation/scan error (${consecutiveNavFailures}/3): ${navErr.message}`);
+      if (consecutiveNavFailures >= 3) {
+        shared.errors.push(`Worker ${workerId} aborted after repeated navigation errors: ${navErr.message}`);
+        break;
+      }
+      try { await gotoNeedsAction(page, username, password); } catch (_) { /* retry next loop */ }
+      await delay(1500);
+      continue;
+    }
+
+    if (!claim) {
+      if (shared.activeClaims > 0) {
+        // Other workers are still issuing; the list will shrink. Wait, refresh, retry.
+        await delay(1500);
+        try { await gotoNeedsAction(page, username, password); } catch (_) { /* retry next loop */ }
+        continue;
+      }
+      console.log(`[Worker ${workerId}] no claimable rows and no active work — done`);
+      break;
+    }
+
+    shared.activeClaims++;
+    shared.state.actionAttempts++;
+    try {
+      const ok = claim.hasCreate
+        ? await processCreate(page, claim.row, claim.rowData, shared.errors, claim.pageNum)
+        : await processIssue(page, claim.row, claim.rowData, shared.errors, claim.pageNum);
+      if (ok) {
+        shared.processedInvoices.push({
+          soNumber: claim.rowData.soNumber,
+          balance: claim.rowData.balance,
+          total: claim.rowData.total,
+          action: claim.hasCreate ? 'Created & Issued' : 'Issued',
+          worker: workerId
+        });
+      }
+    } catch (e) {
+      console.error(`[Worker ${workerId}] failed ${claim.rowData.soNumber}: ${e.message}`);
+      shared.errors.push(`Worker ${workerId} failed ${claim.rowData.soNumber}: ${e.message}`);
+      try { await gotoNeedsAction(page, username, password); } catch (_) { /* recover next loop */ }
+    } finally {
+      shared.activeClaims--;
+    }
+  }
+  console.log(`[Worker ${workerId}] exiting (processed via this tab so far)`);
+}
+
+// Orchestrate W workers across W tabs sharing one browser session.
+async function runWorkerPool(browser, firstPage, username, password, shared) {
+  const workerCount = shared.limits.workerCount;
+  console.log(`[Main] Parallel mode: ${workerCount} workers`);
+
+  const pages = [firstPage];
+  for (let i = 1; i < workerCount; i++) {
+    pages.push(await createWorkerPage(browser));
+  }
+
+  // Bring every tab to the NEEDS ACTION list concurrently (shared cookies authenticate
+  // the new tabs). Doing this sequentially would burn a big chunk of the time budget on
+  // setup before any invoice is issued.
+  await Promise.all(pages.map(p => gotoNeedsAction(p, username, password)));
+
+  await Promise.all(pages.map((p, i) => runFulcrumWorker(i, p, shared, username, password)));
+}
+
 export async function runFulcrumProcessor(username, password, headless = true, options = {}) {
   const processedInvoices = [];
   const errors = [];
@@ -1300,38 +1470,55 @@ export async function runFulcrumProcessor(username, password, headless = true, o
     
     // Login
     await login(page, username, password);
-    
-    // Navigate to invoicing
-    await goToInvoicing(page);
-    
-    // Click NEEDS ACTION
-    await clickNeedsAction(page);
-    
-    // Process all pages
-    while (hasMorePages && pageCount < limits.maxPages && !state.stopReason) {
-      pageCount++;
-      console.log(`\n[Main] Processing page ${pageCount}...\n`);
 
-      const pageProcessed = await processPage(page, processedInvoices, errors, processedSOSet, limits, state);
+    if (limits.workerCount > 1) {
+      // ---- Parallel worker pool ----
+      const shared = {
+        processedInvoices,
+        errors,
+        claimedSet: processedSOSet, // reuse the dedup set as the shared claim set
+        state,
+        limits,
+        activeClaims: 0
+      };
+      await runWorkerPool(browser, page, username, password, shared);
+      // Workers exit either because the queue drained (no stopReason) or the budget
+      // was hit. Draining means no more pages remain.
+      if (!state.stopReason) hasMorePages = false;
+    } else {
+      // ---- Serial path (proven, single tab) ----
+      // Navigate to invoicing
+      await goToInvoicing(page);
 
-      if (!pageProcessed) {
-        console.log('[Main] Page processing failed, stopping');
-        break;
+      // Click NEEDS ACTION
+      await clickNeedsAction(page);
+
+      // Process all pages
+      while (hasMorePages && pageCount < limits.maxPages && !state.stopReason) {
+        pageCount++;
+        console.log(`\n[Main] Processing page ${pageCount}...\n`);
+
+        const pageProcessed = await processPage(page, processedInvoices, errors, processedSOSet, limits, state);
+
+        if (!pageProcessed) {
+          console.log('[Main] Page processing failed, stopping');
+          break;
+        }
+
+        if (state.stopReason) {
+          console.log(`[Main] Fulcrum processing stopped early: ${state.stopReason}`);
+          break;
+        }
+
+        hasMorePages = await checkNextPage(page);
       }
 
-      if (state.stopReason) {
-        console.log(`[Main] Fulcrum processing stopped early: ${state.stopReason}`);
-        break;
+      if (pageCount >= limits.maxPages && hasMorePages && !state.stopReason) {
+        state.stopReason = `hit page limit safety check (${limits.maxPages} pages)`;
+        console.log(`[Main] WARNING: ${state.stopReason}`);
       }
-
-      hasMorePages = await checkNextPage(page);
     }
 
-    if (pageCount >= limits.maxPages && hasMorePages && !state.stopReason) {
-      state.stopReason = `hit page limit safety check (${limits.maxPages} pages)`;
-      console.log(`[Main] WARNING: ${state.stopReason}`);
-    }
-    
     console.log('\n=== FULCRUM COMPLETE ===');
     console.log(`Processed: ${processedInvoices.length}`);
     console.log(`Action attempts: ${state.actionAttempts}`);
@@ -1386,3 +1573,5 @@ export async function runFulcrumProcessor(username, password, headless = true, o
 
 export default { runFulcrumProcessor };
 export { isCreateDetailTimeoutError };
+// Internal helpers exported for the parallel-worker refactor + live investigation tooling.
+export { initBrowser, login, goToInvoicing, clickNeedsAction, extractRowData, config };

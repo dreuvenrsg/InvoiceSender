@@ -4,277 +4,94 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Project Overview
 
-RSG Invoice Processor is an AWS Lambda-based automation system that processes invoices in two stages:
+RSG Invoice Processor is an AWS Lambda (SAM) automation that processes invoices in two stages on a daily schedule (5:00 PM `America/Los_Angeles`). It is effectively a two-file application plus SAM infra.
 
-1. **Fulcrum Stage** (`fulcrumProcessor.js`): Browser automation using Puppeteer to create and issue invoices in Fulcrum
-2. **QBO Stage** (`V2_emailSender.js`): QuickBooks Online API integration to send invoices via email
+1. **Fulcrum stage** (`fulcrumProcessor.js`) — Puppeteer browser automation that logs into Fulcrum, finds "NEEDS ACTION" invoices, and creates/issues them per business rules.
+2. **QBO stage** (`V2_emailSender.js`) — also the Lambda handler/orchestrator. Refreshes the QBO OAuth token, fetches unissued invoices, validates shipping status via the Fulcrum API, updates PO numbers, and emails the sendable ones to customers. Finishes by sending an SES summary email of both stages.
 
-The system runs on AWS Lambda with a scheduled trigger (daily at 5 PM Pacific).
+The deployed Lambda handler is `V2_emailSender.handler`.
 
-## Architecture
+## Source of Truth & Entrypoint
 
-### Two-Stage Processing Pipeline
+- **Treat the code as source of truth over the docs.** `README.md` and `QUICKSTART.md` are stale — they reference `index.js`, which does not exist.
+- The real local entrypoint is `V2_emailSender.js`.
+- `package.json` scripts `test-local` (`node index.js`) and `invoke-local` (uses `events/invoke.json`) are **broken** — neither `index.js` nor `events/` exists. Don't rely on them.
 
-```
-Lambda Handler (V2_emailSender.js)
-    ↓
-Stage 1: Fulcrum Browser Automation (fulcrumProcessor.js)
-    → Launches headless Chromium
-    → Logs into Fulcrum
-    → Processes "NEEDS ACTION" invoices
-    → Creates/Issues invoices based on business rules
-    → Returns results (processed invoices + errors)
-    ↓
-Stage 2: QBO API Processing (V2_emailSender.js)
-    → Refreshes OAuth token (stored in SSM Parameter Store)
-    → Fetches unissued invoices from QuickBooks
-    → Checks shipping status via Fulcrum API
-    → Updates PO numbers
-    → Sends invoices to customers (excludes Siemens/Honeywell)
-    → Returns results (sent/skipped/errors)
-    ↓
-Stage 3: Email Notification
-    → Sends summary email via SES with both stages' results
-```
+## Commands
 
-### Key Components
-
-- **fulcrumProcessor.js**: Puppeteer-based browser automation
-  - Uses `@sparticuz/chromium` for Lambda compatibility
-  - Has local mode (visible browser) and Lambda mode (headless)
-  - Includes TTS "Sheila Bot" announcements for local development
-  - Handles pagination and dynamic element waiting
-
-- **V2_emailSender.js**: Main handler with QBO integration
-  - OAuth token management via AWS SSM Parameter Store
-  - Customer filtering (excluded/included lists)
-  - Shipping status validation
-  - Email reporting via AWS SES
-  - Configuration for sandbox vs production environments
-
-- **template.yaml**: AWS SAM infrastructure
-  - Node.js 20 runtime
-  - 3008 MB memory (required for Chromium)
-  - 900s timeout (15 minutes)
-  - Public Chromium layer (us-east-2)
-  - EventBridge schedule trigger (5 PM PT daily)
-
-## Development Commands
-
-### Local Testing
 ```bash
-# Test with visible browser (macOS/Linux)
+npm install
+
+# Run the full pipeline locally (visible browser). This is the real local entrypoint:
 node V2_emailSender.js
 
-# Or use npm script
-npm run test-local
+# Unit/regression tests (Node's built-in test runner):
+npm test                              # node --test tests/*.test.js
+node --test tests/invoiceSender.test.js   # run a single test file
+
+# SAM build / deploy / ops:
+npm run build      # sam build
+npm run deploy     # sam build && sam deploy (stack: rsg-invoice-processor, us-west-1)
+npm run logs       # tail CloudWatch logs for RSGInvoiceProcessor
+npm run info       # describe the CloudFormation stack
 ```
 
-### Building and Deployment
-```bash
-# Build with SAM
-npm run build
+Before marking a code change complete: run `npm test`; run `npm run build` for SAM/packaging changes; run `node V2_emailSender.js` for local behavior when credentials are available. If a change touches Fulcrum browser automation, note whether interactive local verification was performed.
 
-# Deploy to AWS
-npm run deploy
+## Architecture & Non-Obvious Details
 
-# Deploy with prompts (first time)
-npm run deploy-guided
+### Single-run lock (DynamoDB)
+A distributed lock prevents concurrent/overlapping runs. The handler acquires a lock in `RSGInvoiceProcessorLocks` (conditional `PutItem`, TTL-expiring) before processing and deletes it after. Configured via `INVOICE_PROCESSOR_LOCK_TABLE` / `INVOICE_PROCESSOR_LOCK_NAME` env vars (set in `template.yaml`). If the table env var is unset (e.g. some local runs), it logs a warning and continues without the guard. See the lock helpers near the bottom of `V2_emailSender.js` (~line 2136+).
 
-# Remove stack
-npm run remove
-```
+### Parallel QBO sending
+QBO invoices are sent in small parallel batches with deliberate rate limiting (`BATCH_SIZE = 3`, ~200ms between batches) to stay under QBO API limits (~line 1781+). Metrics land in `results.parallelProcessingMetrics` and are reported in the summary email.
 
-### Testing and Monitoring
-```bash
-# Invoke locally with SAM
-npm run invoke-local
+### Customer filtering: three categories
+Sending decisions are not a simple include/exclude. The summary email and `candidatePolicySummary` distinguish:
+- **explicitlyExcludedCustomers** — deliberately never sent (e.g. Siemens/Honeywell).
+- **allowlistMissCustomers** — not on the included allowlist, so skipped (distinct from explicit exclusion).
+- **sendableCustomers** — pass the allowlist and have a valid recipient email.
 
-# View CloudWatch logs (live tail)
-npm run logs
+The allowlist arrays live in `V2_emailSender.js` (~line 137+) and are case-insensitive. Recipient routing has special cases (e.g. HLI ship-to routing, default to customer primary email) — these are protected by the test suite, so preserve their behavior.
 
-# Get stack info
-npm run info
-```
+### Configuration
+`const activeConfig = config.production;` (~line 466) switches between sandbox and production config blocks.
 
-## Environment Variables
-
-### Required for Lambda (set in template.yaml parameters)
-- `FROM_EMAIL`: Sender email for SES notifications
-- `TO_EMAILS`: Comma-separated recipient emails for reports
-- `deploy_region`: AWS region (default: us-east-2)
-
-### For Local Testing
-Set these environment variables before running locally:
-```bash
-export AWS_REGION=us-east-2
-export FROM_EMAIL=dreuven@rsgsecurity.com
-export TO_EMAILS=ar@rsgsecurity.com
-```
-
-## Configuration
-
-### Switching Between Sandbox and Production
-In `V2_emailSender.js`, locate the configuration section:
-```javascript
-const activeConfig = config.production; // or config.sandbox
-```
-
-### Customer Filtering
-The `EXCLUDED_CUSTOMERS` and `INCLUDED_CUSTOMERS` arrays in `V2_emailSender.js` control which customers receive invoices. These are case-insensitive.
-
-### Fulcrum Processing Rules
-In `fulcrumProcessor.js`, the `shouldProcessRow()` function determines which invoices to process:
-- Skips invoices with REFUND badge
-- Can add custom balance/total validation rules
-
-### Timeouts
-Adjust timeouts in `fulcrumProcessor.js` config if Fulcrum UI becomes slower:
-```javascript
-timeouts: {
-  navigation: 35000,      // Page load timeout
-  elementWait: 30000,     // Element appearance timeout
-  actionDelay: 6000,      // Delay after clicks
-  modalWait: 6000,        // Modal processing timeout
-  pageStabilization: 6000 // After page change
-}
-```
+### Testable exports
+`V2_emailSender.js` exports `buildFulcrumRunOptions`, `buildInvocationLockMetadata`, `buildSummaryEmailContent`, `customerModule`, and `utils`; `fulcrumProcessor.js` exports `isCreateDetailTimeoutError`. The regression suite (`tests/invoiceSender.test.js`) exercises these to protect: excluded-customer visibility in summary emails, HLI ship-to routing, and default primary-email recipient selection. When changing send/routing/summary logic, extend these tests and keep them green.
 
 ## OAuth Token Management
 
-OAuth tokens are stored in AWS SSM Parameter Store at:
-- Production: `/qbo-invoice-sender/prod/refresh-token`
-- Sandbox: `/qbo-invoice-sender/sandbox/refresh-token`
+QBO refresh tokens live in SSM at `/qbo-invoice-sender/prod/refresh-token` (and `.../sandbox/...`). The system loads the refresh token from SSM (falling back to the hardcoded value in `config.production.REFRESH_TOKEN`), exchanges it for an access token, and writes the rotated refresh token back to SSM. Keep SSM and the code config in sync.
 
-The system automatically:
-1. Loads refresh token from SSM (falls back to hardcoded config if not found)
-2. Exchanges it for a new access token
-3. Saves the new refresh token back to SSM
+On `invalid_grant` / "invalid refresh token":
+1. `aws ssm get-parameter --name "/qbo-invoice-sender/prod/refresh-token" --with-decryption --region us-west-1`
+2. If stale, mint a new one via the QuickBooks OAuth playground (client_id is in CLAUDE.md history / the connect URL).
+3. Update both SSM (`aws ssm put-parameter ... --type SecureString --overwrite`) and `REFRESH_TOKEN` in `V2_emailSender.js`, then redeploy.
 
-**Important**: The refresh token in `V2_emailSender.js` (`config.production.REFRESH_TOKEN`) should be kept in sync with SSM. When OAuth fails:
-1. Check SSM Parameter Store first: `aws ssm get-parameter --name "/qbo-invoice-sender/prod/refresh-token" --with-decryption --region us-east-2`
-2. If needed, get a new refresh token from QuickBooks OAuth playground:
-   ```
-   https://appcenter.intuit.com/connect/oauth2?client_id=ABFEj4xs3FW9f1oCAEXrH0Ww04eFdJAbQSQwbq03imSVrkXLY4&response_type=code&scope=com.intuit.quickbooks.accounting&redirect_uri=https://developer.intuit.com/v2/OAuth2Playground/RedirectUrl&state=xyz123
-   ```
-3. Update both SSM and the code config
-4. Redeploy if code was changed
+When touching auth/token handling, move toward env vars or SSM rather than adding new hardcoded secrets.
 
-## Important Files Not to Modify
+## Infrastructure (template.yaml)
 
-- `.env` - Contains credentials (in .gitignore)
-- `.refresh-token-prod.txt` - OAuth token backup (in .gitignore)
-- `.aws-sam/` - SAM build artifacts
+- **Runtime:** Node.js 22 (`nodejs22.x`), x86_64. **Region:** `us-west-1`. Stack `rsg-invoice-processor`, function `RSGInvoiceProcessor`.
+- **Memory 3008 MB, timeout 900s, 2048 MB ephemeral storage** — required for headless Chromium. Don't lower these unless explicitly asked.
+- **Chromium** comes from a public Lambda layer ARN (`ChromiumLayerArn`, currently `...us-west-1:764866452798:layer:chrome-aws-lambda:63`). Update the ARN if the deploy region changes.
+- IAM grants: SSM Get/Put on `/qbo-invoice-sender/*`, SES SendEmail, DynamoDB Put/DeleteItem on the lock table, CloudWatch Logs.
+- Schedule: `ScheduleV2` cron `0 17 * * ? *` in `America/Los_Angeles`.
 
-## Lambda Deployment Notes
+## Working Rules
 
-1. **Chromium Layer**: Uses public layer `arn:aws:lambda:us-east-2:764866452798:layer:chrome-aws-lambda:50`
-   - If deploying to a different region, update the ARN in template.yaml
-   - Check https://github.com/shelfio/chrome-aws-lambda-layer for region-specific ARNs
-
-2. **Memory Requirements**: 3008 MB required for Chromium browser automation
-
-3. **Timeout**: 900s (15 min) to handle large batches of invoices
-
-4. **IAM Permissions**: Lambda needs:
-   - SSM: GetParameter, PutParameter for OAuth tokens
-   - SES: SendEmail for notifications
-   - CloudWatch Logs: CreateLogGroup, CreateLogStream, PutLogEvents
-
-## Business Logic
-
-### Invoice Processing Flow
-1. Fulcrum creates/issues invoices that have "NEEDS ACTION" status
-2. QBO fetches unissued invoices
-3. System checks if order is fully shipped (via Fulcrum API)
-4. If shipped, updates PO number and sends invoice to customer
-5. Excluded customers (Siemens/Honeywell) are skipped
-6. Email summary sent to AR team
-
-### Error Handling
-- Each stage catches its own errors independently
-- Errors in one stage don't prevent the other from running
-- All errors are reported in the email summary
-- Lambda returns success (200) even if some invoices fail
-- **System Error Notifications**: If the entire system crashes (unexpected errors), an error email is automatically sent with:
-  - Full error message and stack trace
-  - Processing results up to the point of failure
-  - Both Fulcrum and QBO stage results (if available)
+- Prefer small, targeted edits. Map of where things live:
+  - QBO behavior / business rules / email reporting → `V2_emailSender.js`
+  - Fulcrum selectors, waits, pagination, invoice creation → `fulcrumProcessor.js`
+  - Runtime, schedule, IAM, layer, memory → `template.yaml`
+- Never edit `.aws-sam/` or `node_modules/`.
+- Keep credentials out of commits/diffs. Be careful around `.env`, `.refresh-token-prod.txt`, and any tokens already hardcoded in `V2_emailSender.js`.
+- **When changing invoice send flows, validate not just that a send was *attempted* but *where* it went** — verify against real observable outputs (QBO results, SES payloads, Fulcrum state, logs) rather than only that a function was called.
 
 ## Troubleshooting
 
-### "Chromium not found" in Lambda
-- Verify Chromium layer ARN matches your region in template.yaml
-- Check CloudWatch logs for executablePath
-
-### "NEEDS ACTION button not found"
-- Fulcrum UI may have changed
-- Update selector in fulcrumProcessor.js
-- Increase wait timeouts
-
-### OAuth Token Refresh Failed
-Error: `"invalid_grant"` or `"Incorrect or invalid refresh token"`
-
-**Solution**:
-1. Check AWS SSM for current token:
-   ```bash
-   aws ssm get-parameter --name "/qbo-invoice-sender/prod/refresh-token" --with-decryption --region us-east-2
-   ```
-2. If SSM token is outdated, get new one from QuickBooks OAuth playground (see OAuth Token Management section)
-3. Update `V2_emailSender.js` line 46: `REFRESH_TOKEN: "RT1-..."`
-4. Update SSM Parameter Store:
-   ```bash
-   aws ssm put-parameter --name "/qbo-invoice-sender/prod/refresh-token" --value "RT1-..." --type SecureString --overwrite --region us-east-2
-   ```
-5. Redeploy: `sam build && sam deploy`
-
-### Fulcrum Pagination Issues
-If Fulcrum processor keeps looping through pages or doesn't stop:
-- Check that "NEEDS ACTION" filter is active after page changes
-- Pagination logic checks: current page number vs total pages, next button disabled state
-- System has 20-page safety limit to prevent infinite loops
-- Review `fulcrumProcessor.js` `checkNextPage()` function (lines 501-564)
-
-### Function Timeout
-- Normal for large batches (100+ invoices)
-- Check CloudWatch logs to see progress
-- Consider increasing timeout in template.yaml (max 15 min)
-
-## Testing Strategy
-
-1. **Local First**: Always test locally with visible browser (`node V2_emailSender.js`)
-2. **Sandbox Mode**: Test with sandbox config before production
-3. **Lambda Test**: Use `npm run invoke-local` for SAM local testing
-4. **Monitor Logs**: Keep `npm run logs` running during execution
-5. **Check Email**: Verify email summary report after each run
-
-## Recent Updates (December 2025)
-
-### Fixed OAuth Token Authentication
-- **Issue**: Production refresh token expired, causing `invalid_grant` errors
-- **Solution**: Updated token from AWS SSM Parameter Store
-- **Files Changed**: `V2_emailSender.js` (line 46)
-- **Current Token**: `RT1-130-H0-1774055940wv9v4sjzw6d75pvomba6`
-
-### Added System Error Email Notifications
-- **Feature**: Automatic error emails when system crashes unexpectedly
-- **Benefit**: Team is immediately notified of critical failures
-- **Implementation**:
-  - Local execution: `V2_emailSender.js` lines 1439-1455
-  - Lambda handler: `V2_emailSender.js` lines 1645-1671
-- **Email Contains**: Full error message, stack trace, and processing results
-
-### Improved Fulcrum Pagination
-- **Issue**: Pagination was looping infinitely on some pages
-- **Solution**: Enhanced pagination detection logic
-- **Changes**:
-  - Check current page number vs total pages
-  - Multiple methods to verify next button disabled state
-  - More robust button state detection
-- **Files Changed**: `fulcrumProcessor.js` lines 501-564
-
-### Deployment
-- Last deployed: December 11, 2025
-- Git commit: `48875c2`
-- AWS Region: us-west-1
-- Lambda Function: `RSGInvoiceProcessor`
+- **"Chromium not found" in Lambda** — verify the layer ARN matches the deploy region in `template.yaml`.
+- **"NEEDS ACTION button not found"** — Fulcrum UI likely changed; update the selector in `fulcrumProcessor.js` and/or increase timeouts (`timeouts` config block).
+- **Pagination loops** — `fulcrumProcessor.js` has a 20-page safety limit; check that the "NEEDS ACTION" filter stays active across page changes (see `checkNextPage()`).
+- **Function timeout** — normal for large batches (100+ invoices); watch `npm run logs` for progress.
