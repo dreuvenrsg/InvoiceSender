@@ -101,9 +101,8 @@ Resources:
             Description: Run every day at 5:00 PM America/Los_Angeles
             ScheduleExpression: "cron(0 17 * * ? *)"
             ScheduleExpressionTimezone: "America/Los_Angeles"
-            # Temporarily disabled while changes are in progress. Set back to
-            # "ENABLED" (and redeploy) to resume daily automatic invoice sending.
-            State: "DISABLED"
+            # Re-enabled 2026-06-10 after the error-reporting/routing/allowlist fixes.
+            State: "ENABLED"
             FlexibleTimeWindow:
               Mode: "OFF"
 
