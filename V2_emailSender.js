@@ -2388,16 +2388,26 @@ async function auditQueryAll(queryBase) {
   return out;
 }
 
+// QBO's PaymentMethod.Type is unreliable in this account (ACH/Wire/Check are tagged
+// CREDIT_CARD), so identify real cards by method NAME instead.
+const AUDIT_CC_NAME_RE = /visa|master\s?card|amex|american express|discover|credit card|generic card|gift card/i;
+
 async function auditMisroutesForRange(start, end) {
   const cust = {};
   for (const active of ['true', 'false'])
     for (const c of await auditQueryAll(`SELECT Id, DisplayName, PrimaryEmailAddr FROM Customer WHERE Active = ${active}`))
       cust[c.Id] = { name: c.DisplayName, profile: c.PrimaryEmailAddr?.Address || '' };
 
+  // Credit-card payment ids (matched by method name), used to drop card-paid invoices.
+  const ccMethodIds = new Set((await auditQueryAll('SELECT * FROM PaymentMethod'))
+    .filter(m => AUDIT_CC_NAME_RE.test(m.Name || '')).map(m => m.Id));
+  const ccPaymentIds = new Set((await auditQueryAll(`SELECT * FROM Payment WHERE TxnDate >= '${start}'`))
+    .filter(p => ccMethodIds.has(p.PaymentMethodRef?.value)).map(p => p.Id));
+
   const sent = (await auditQueryAll(`SELECT * FROM Invoice WHERE TxnDate >= '${start}' AND TxnDate <= '${end}'`))
     .filter(i => i.EmailStatus === 'EmailSent');
 
-  const groups = {}; const leaks = []; let total = 0;
+  const groups = {}; const leaks = []; let total = 0; let filteredResolved = 0;
   for (const inv of sent) {
     const c = cust[inv.CustomerRef?.value] || { name: inv.CustomerRef?.name || 'Unknown', profile: '' };
     const billed = inv.BillEmail?.Address || '';
@@ -2409,8 +2419,15 @@ async function auditMisroutesForRange(start, end) {
     else if (bSet.size === 1 && bSet.has('ar@rsgsecurity.com')) continue;     // safe to AR
     else cat = [...auditDomSet(billed)].some(d => d && !auditDomSet(c.profile).has(d)) ? 'LEAK' : 'WRONG';
 
-    const item = { doc: inv.DocNumber, id: inv.Id };
-    if (auditIsExcluded(c.name)) leaks.push({ ...item, customer: c.name, sentTo: billed });
+    const isLeak = auditIsExcluded(c.name);
+    const paid = Number(inv.Balance) === 0;
+    const paidByCard = (inv.LinkedTxn || []).some(t => t.TxnType === 'Payment' && ccPaymentIds.has(t.TxnId));
+    // Resolved invoices (already paid / card-paid) need no AP follow-up, so drop them.
+    // Exception: excluded-customer leaks are always surfaced regardless of payment status.
+    if (!isLeak && (paid || paidByCard)) { filteredResolved++; continue; }
+
+    const item = { doc: inv.DocNumber, id: inv.Id, month: (inv.TxnDate || '').slice(0, 7) };
+    if (isLeak) leaks.push({ ...item, customer: c.name, sentTo: billed, paid });
     const extras = [...bSet].filter(a => !pSet.has(a));
     let explanation;
     if (cat === 'NO-PROFILE') explanation = `No email on the QBO profile &mdash; auto-sent to the Fulcrum address (${auditEsc(billed)}).`;
@@ -2420,30 +2437,38 @@ async function auditMisroutesForRange(start, end) {
     (groups[key] ||= { customer: c.name, cat, explanation, items: [] }).items.push(item);
     total++;
   }
-  return { total, leaks, groups: Object.values(groups).sort((a, b) => b.items.length - a.items.length), scanned: sent.length };
+  return { total, leaks, filteredResolved, groups: Object.values(groups).sort((a, b) => b.items.length - a.items.length), scanned: sent.length };
 }
 
 function buildAuditReportEmail(audit, label) {
   const link = i => `<a href="${qboLink(i.id)}">${auditEsc(i.doc)}</a>`;
+  // Render a group's invoices grouped by month (one line per month present).
+  const renderItems = items => {
+    const months = [...new Set(items.map(i => i.month))].sort();
+    return months.map(m => {
+      const xs = items.filter(i => i.month === m).sort((a, b) => a.doc < b.doc ? 1 : -1);
+      return `<b>${auditEsc(m)}</b> (${xs.length}): ${xs.map(link).join(', ')}`;
+    }).join('<br>&nbsp;&nbsp;');
+  };
   const leakHtml = audit.leaks.length
     ? `<div style="border:2px solid #c00;padding:8px 12px;background:#fff5f5">
 <h3 style="color:#c00;margin:4px 0">🚨 Sent to a party that should NOT have received the invoice</h3>
-<ul>${audit.leaks.map(l => `<li><b>${link(l)} &mdash; ${auditEsc(l.customer)}</b> was emailed to <b>${auditEsc(l.sentTo)}</b> (excluded customer).</li>`).join('')}</ul></div>`
+<ul>${audit.leaks.map(l => `<li><b>${link(l)} &mdash; ${auditEsc(l.customer)}</b> was emailed to <b>${auditEsc(l.sentTo)}</b> (excluded customer)${l.paid ? ' &mdash; already paid, shown anyway because it reached the wrong party' : ''}.</li>`).join('')}</ul></div>`
     : '';
   const groupsHtml = audit.groups.map(g =>
     `<div style="margin-bottom:10px;border-bottom:1px solid #eee;padding-bottom:6px">
 <b>[${g.cat}] ${auditEsc(g.customer)}</b> &mdash; ${g.items.length} invoice(s)<br>
 &nbsp;&nbsp;<span style="color:#444">${g.explanation}</span><br>
-&nbsp;&nbsp;${g.items.sort((a, b) => a.doc < b.doc ? 1 : -1).map(link).join(', ')}
+&nbsp;&nbsp;${renderItems(g.items)}
 </div>`).join('');
   const html = `<div style="font-family:Arial,sans-serif;font-size:13px;color:#222;line-height:1.5">
-<p>Monthly invoice-routing audit for <b>${auditEsc(label)}</b>. Checked ${audit.scanned} emailed invoices; <b>${audit.total}</b> went to an address not (fully) on the customer's QuickBooks profile. Each invoice links to QuickBooks.</p>
+<p>Invoice-routing audit for <b>${auditEsc(label)}</b>. Checked ${audit.scanned} emailed invoices; <b>${audit.total}</b> still-open invoice(s) went to an address not (fully) on the customer's QuickBooks profile. Each invoice links to QuickBooks.</p>
 ${leakHtml}
-<h3>By customer</h3>
+<h3>By customer (open invoices only)</h3>
 ${groupsHtml}
-<p style="color:#888;font-size:12px">Excludes invoices sent to one of the customer's configured addresses (just not all), and excluded-customer invoices that went to ar@rsgsecurity.com (safe).</p>
+<p style="color:#888;font-size:12px">Excludes: already-paid / credit-card-paid invoices (${audit.filteredResolved || 0} resolved this period), invoices sent to one of the customer's configured addresses, and excluded-customer invoices that went to ar@rsgsecurity.com. Excluded-customer leaks are always shown regardless of payment.</p>
 </div>`;
-  return { subject: `Invoice routing audit — ${label}: ${audit.leaks.length} leak(s), ${audit.total} mis-route(s)`, html };
+  return { subject: `Invoice routing audit — ${label}: ${audit.leaks.length} leak(s), ${audit.total} open mis-route(s)`, html };
 }
 
 function buildAuditAllClearEmail(label) {

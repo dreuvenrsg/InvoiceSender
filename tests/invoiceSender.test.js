@@ -361,13 +361,15 @@ test('monthly audit email builders: all-clear vs report with leaks + QBO links',
   assert.match(clear.html, /Excellence/);
 
   const rep = buildAuditReportEmail({
-    total: 1, scanned: 10,
-    leaks: [{ doc: 'F10006', id: '215001', customer: 'SIEMENS INDUSTRY INC', sentTo: 'x@siemens.com' }],
-    groups: [{ customer: 'SIEMENS INDUSTRY INC', cat: 'LEAK', explanation: 'verify', items: [{ doc: 'F10006', id: '215001' }] }]
+    total: 1, scanned: 10, filteredResolved: 5,
+    leaks: [{ doc: 'F10006', id: '215001', customer: 'SIEMENS INDUSTRY INC', sentTo: 'x@siemens.com', paid: true }],
+    groups: [{ customer: 'SIEMENS INDUSTRY INC', cat: 'LEAK', explanation: 'verify', items: [{ doc: 'F10006', id: '215001', month: '2026-05' }] }]
   }, 'May 2026');
   assert.match(rep.subject, /1 leak/);
   assert.match(rep.html, /should NOT have received/);
   assert.match(rep.html, /qbo\.intuit\.com\/app\/invoice\?txnId=215001/);
+  assert.match(rep.html, /already paid, shown anyway/); // paid leak is still surfaced
+  assert.match(rep.html, /credit-card-paid invoices/);  // filter footnote present
 });
 
 test('allowlist matches exact QBO name (case-insensitive), not substring', () => {
