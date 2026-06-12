@@ -43,8 +43,10 @@ RSG_Website (this repo)                    RSG_AI_Tools (separate repo)
 1. **Server-side proxy route** (`app/api/rsg-ai/chat/route.ts`): verify
    better-auth session with `role === "admin"` (403 otherwise), forward the
    body to `${RSG_AI_URL}/api/chat` with `Authorization: Bearer
-   ${RSG_AI_API_KEY}` and `user: session.user.email` injected, relay the SSE
-   response stream unmodified. A second tiny proxy for `GET /api/tools` is
+   ${RSG_AI_API_KEY}`, `user: session.user.email`, and
+   `role: session.user.role` injected, relay the SSE response stream
+   unmodified. The role gates which tools the agent gets (matrix in the
+   contract doc); unknown roles produce a friendly in-chat denial. A second tiny proxy for `GET /api/tools` is
    optional (nice for a "what can I ask?" panel).
 2. **Admin chat page** (under the existing Admin area, admin-gated like its
    siblings): streaming chat UI handling the SSE events —

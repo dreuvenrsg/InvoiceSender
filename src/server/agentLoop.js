@@ -57,7 +57,11 @@ export function extractArtifacts(toolName, result) {
  * Returns { newMessages, stopReason, usage } where newMessages are the turns
  * appended during this run — the caller persists them for follow-ups.
  */
-export async function runAgentTurn({ client, messages, ctx, onEvent = () => {}, model = DEFAULT_MODEL }) {
+export async function runAgentTurn({ client, messages, ctx, onEvent = () => {}, model = DEFAULT_MODEL, allowedTools = null }) {
+  // allowedTools: array of tool names the caller's role permits (null = all).
+  // Disallowed tools are invisible to the model; dispatch re-checks anyway.
+  const allowed = allowedTools && new Set(allowedTools);
+  const visibleDefinitions = toolDefinitions().filter((d) => !allowed || allowed.has(d.name));
   const convo = [...messages];
   const baseLength = convo.length;
   let usage = null;
@@ -69,7 +73,7 @@ export async function runAgentTurn({ client, messages, ctx, onEvent = () => {}, 
       thinking: { type: "adaptive" },
       output_config: { effort: "high" },
       system: buildSystemPrompt(),
-      tools: toolDefinitions(),
+      tools: visibleDefinitions,
       messages: convo,
     });
     stream.on("text", (delta) => onEvent({ type: "text", text: delta }));
@@ -91,6 +95,7 @@ export async function runAgentTurn({ client, messages, ctx, onEvent = () => {}, 
       try {
         const tool = getTool(tu.name);
         if (!tool) throw new Error(`Unknown tool: ${tu.name}`);
+        if (allowed && !allowed.has(tu.name)) throw new Error(`Tool ${tu.name} is not permitted for this user's role`);
         const result = await tool.run(tu.input || {}, ctx);
         for (const artifact of extractArtifacts(tu.name, result)) {
           onEvent({ type: "artifact", ...artifact });

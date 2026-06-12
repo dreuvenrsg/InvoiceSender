@@ -42,13 +42,14 @@ add, remove, or repurpose a file, update its entry in the same PR.
 | `src/tools/index.js` | Tool registry — every agent capability registers here as `{ definition, run }` |
 | `src/tools/accounting/landedCost.js` | `qbo_landed_cost_report`: per-part spend with freight/tariff/fee/tax allocation |
 | `src/tools/accounting/cashApplication.js` | `qbo_cash_application_lookup`: how customer payments were applied to AR invoices |
-| `src/tools/fulcrum/apiRequest.js` | `fulcrum_api_request`: general-purpose read-only ERP API access with response truncation |
+| `src/tools/fulcrum/apiRequest.js` | Fulcrum tool factory: unrestricted explorer + purchasing-scoped + sales-scoped variants |
 | `src/tools/system/saveNote.js` | `save_operational_note`: agent appends verified discoveries to its learned knowledge |
 | `src/server/index.js` | Agent API HTTP server: `POST /api/chat` (SSE), `GET /api/tools`, `/healthz`; bearer auth; audit logging |
 | `src/server/agentLoop.js` | The Claude tool-use loop: streaming, tool dispatch, result summarization, artifacts |
 | `src/server/systemPrompt.js` | Base prompt + runtime composition of the knowledge files |
 | `src/server/log.js` | JSONL audit logger (requestId, user, timings, usage) |
 | `src/server/attachments.js` | Upload normalization: byte-sniffed media types, text decode, Excel→CSV conversion |
+| `src/server/permissions.js` | Role→tool access matrix (mirrors RSG_Website `lib/roles.ts` by design) + denial message |
 | `src/server/knowledge/accounting.md` | Curated: QBO bookkeeping conventions (part-number prefixes, overhead lines) |
 | `src/server/knowledge/fulcrum.md` | Curated: Fulcrum API behavior (list conventions, **sorting ignored**, lookup trails) |
 | `src/server/knowledge/learned.md` | Agent-written notes via `save_operational_note`; review via git diff |
@@ -79,6 +80,7 @@ add, remove, or repurpose a file, update its entry in the same PR.
 | `specs/004-agent-knowledge-system.md` | Curated + agent-written operational notes |
 | `specs/005-deployment.md` | EC2 (live) + Fargate (graduation) deployment |
 | `specs/006-file-uploads.md` | Upload normalization: images/PDF/text/Excel |
+| `specs/007-role-scoped-tools.md` | Role-based tool access + purchasing/sales scoped Fulcrum tools |
 
 ## Tests
 

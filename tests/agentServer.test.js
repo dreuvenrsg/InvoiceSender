@@ -182,3 +182,62 @@ test("attachment normalization sniffs real bytes over the declared type", async 
   ]);
   assert.equal(msg.content[0].source.media_type, "image/png");
 });
+
+test("role permissions: matrix, validation, and messages", async () => {
+  const { isValidRole, toolNamesForRole, PERMISSION_MESSAGE, ADMIN_ROLES, TOOL_ACCESS } = await import("../src/server/permissions.js");
+  const { tools } = await import("../src/tools/index.js");
+
+  assert.ok(isValidRole("quality_control"));
+  assert.ok(isValidRole("super_admin"));
+  assert.equal(isValidRole("user"), false);
+  assert.equal(isValidRole(""), false);
+  assert.equal(isValidRole(null), false);
+  assert.equal(isValidRole("Finance"), false); // case-sensitive, matches website enum exactly
+
+  // every registered tool has an explicit access entry (fail closed otherwise)
+  for (const t of tools) assert.ok(TOOL_ACCESS[t.definition.name], `${t.definition.name} missing from TOOL_ACCESS`);
+  // every access entry references a registered tool and valid roles
+  const names = new Set(tools.map((t) => t.definition.name));
+  for (const [tool, roles] of Object.entries(TOOL_ACCESS)) {
+    assert.ok(names.has(tool), `${tool} not registered`);
+    for (const r of roles) assert.ok(ADMIN_ROLES.includes(r), `${tool}: bad role ${r}`);
+  }
+
+  const qc = toolNamesForRole("quality_control");
+  assert.ok(qc.includes("fulcrum_purchasing_request"));
+  assert.ok(!qc.includes("fulcrum_sales_request"));
+  assert.ok(!qc.includes("qbo_landed_cost_report"));
+  assert.ok(!qc.includes("fulcrum_api_request"));
+
+  const cs = toolNamesForRole("customer_service");
+  assert.ok(cs.includes("fulcrum_sales_request"));
+  assert.ok(!cs.includes("fulcrum_purchasing_request"));
+
+  const fin = toolNamesForRole("finance");
+  assert.ok(fin.includes("qbo_landed_cost_report") && fin.includes("fulcrum_purchasing_request") && fin.includes("fulcrum_sales_request"));
+  assert.ok(!fin.includes("fulcrum_api_request"));
+
+  assert.ok(toolNamesForRole("super_admin").includes("fulcrum_api_request"));
+  assert.deepEqual(toolNamesForRole("intern"), []);
+  assert.match(PERMISSION_MESSAGE, /manager/);
+});
+
+test("scoped fulcrum tools enforce their namespaces", async () => {
+  const { endpointAllowed, purchasingTool, salesTool } = await import("../src/tools/fulcrum/apiRequest.js");
+
+  assert.ok(endpointAllowed("/purchase-orders/list?Skip=0", ["purchase-orders"]));
+  assert.ok(endpointAllowed("/receiving/receipts/123/line-items/list", ["receiving"]));
+  assert.equal(endpointAllowed("/sales-orders/list", ["purchase-orders", "receiving"]), false);
+  assert.equal(endpointAllowed("/purchase-orders-fake/list", ["purchase-orders"]), false); // prefix can't leak
+  assert.ok(endpointAllowed("/anything", null)); // unrestricted variant
+
+  // purchasing tool refuses sales endpoints with a useful message (no network call needed)
+  await assert.rejects(
+    () => purchasingTool.run({ method: "POST", endpoint: "/sales-orders/list" }, { fulcrum: null }),
+    /outside this tool's scope/
+  );
+  await assert.rejects(
+    () => salesTool.run({ method: "POST", endpoint: "/vendors/list" }, { fulcrum: null }),
+    /outside this tool's scope/
+  );
+});

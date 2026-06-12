@@ -9,10 +9,10 @@
 // website) consume this same registry.
 import landedCost from "./accounting/landedCost.js";
 import cashApplication from "./accounting/cashApplication.js";
-import fulcrumApiRequest from "./fulcrum/apiRequest.js";
+import fulcrumApiRequest, { purchasingTool, salesTool } from "./fulcrum/apiRequest.js";
 import saveNote from "./system/saveNote.js";
 
-export const tools = [landedCost, cashApplication, fulcrumApiRequest, saveNote];
+export const tools = [landedCost, cashApplication, fulcrumApiRequest, purchasingTool, salesTool, saveNote];
 
 export function toolDefinitions() {
   return tools.map((t) => t.definition);

@@ -14,6 +14,7 @@ import { toolDefinitions } from "../tools/index.js";
 import { runAgentTurn, resolveAnthropicClient, DEFAULT_MODEL } from "./agentLoop.js";
 import { createLogger, truncate, lastUserText } from "./log.js";
 import { normalizeMessages } from "./attachments.js";
+import { isValidRole, toolNamesForRole, PERMISSION_MESSAGE } from "./permissions.js";
 
 const MAX_BODY_BYTES = 30 * 1024 * 1024; // remittance PDFs ride in as base64
 
@@ -97,7 +98,11 @@ export function createServer({ apiKey = process.env.RSG_AI_API_KEY, corsOrigin =
       }
 
       if (req.method === "GET" && url.pathname === "/api/tools") {
-        return json(res, 200, { tools: toolDefinitions() }, corsOrigin);
+        const role = url.searchParams.get("role");
+        const defs = role
+          ? toolDefinitions().filter((d) => toolNamesForRole(role).includes(d.name))
+          : toolDefinitions();
+        return json(res, 200, { role: role || null, tools: defs }, corsOrigin);
       }
 
       if (req.method === "POST" && url.pathname === "/api/chat") {
@@ -108,12 +113,14 @@ export function createServer({ apiKey = process.env.RSG_AI_API_KEY, corsOrigin =
 
         const messages = await normalizeMessages(body.messages);
         const user = (typeof body.user === "string" && body.user) || req.headers["x-rsg-user"] || "unknown";
+        const role = (typeof body.role === "string" && body.role) || req.headers["x-rsg-role"] || null;
         const model = body.model || DEFAULT_MODEL;
         const startedAt = Date.now();
         log({
           type: "chat_request",
           requestId,
           user,
+          role,
           model,
           messageCount: messages.length,
           question: truncate(lastUserText(messages), 500),
@@ -128,6 +135,16 @@ export function createServer({ apiKey = process.env.RSG_AI_API_KEY, corsOrigin =
         res.writeHead(200, headers);
         res.write(sseEncode({ type: "request_accepted", requestId }));
 
+        // Unknown/missing role: a friendly in-chat denial, not an error.
+        if (!isValidRole(role)) {
+          const denial = [{ role: "assistant", content: [{ type: "text", text: PERMISSION_MESSAGE }] }];
+          res.write(sseEncode({ type: "text", text: PERMISSION_MESSAGE }));
+          res.write(sseEncode({ type: "done", stopReason: "permission_denied", usage: null }));
+          res.write(sseEncode({ type: "turn_complete", requestId, newMessages: denial, stopReason: "permission_denied", usage: null }));
+          log({ type: "chat_response", requestId, user, role, durationMs: Date.now() - startedAt, stopReason: "permission_denied" });
+          return res.end();
+        }
+
         let assistantText = "";
         const [anthropic, qbo, fulcrum] = await Promise.all([getAnthropic(), getQbo(), getFulcrum()]);
         const { newMessages, stopReason, usage } = await runAgentTurn({
@@ -135,6 +152,7 @@ export function createServer({ apiKey = process.env.RSG_AI_API_KEY, corsOrigin =
           messages,
           model,
           ctx: { qbo, fulcrum },
+          allowedTools: toolNamesForRole(role),
           onEvent: (event) => {
             if (event.type === "text") assistantText += event.text;
             else if (event.type === "tool_use") {
@@ -149,6 +167,7 @@ export function createServer({ apiKey = process.env.RSG_AI_API_KEY, corsOrigin =
           type: "chat_response",
           requestId,
           user,
+          role,
           model,
           durationMs: Date.now() - startedAt,
           stopReason,

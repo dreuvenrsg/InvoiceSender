@@ -49,6 +49,7 @@ Request body:
 {
   "messages": [ /* Anthropic MessageParam[] — see below */ ],
   "user": "sheffner@rsgsecurity.com",  // REQUIRED in practice: the authenticated admin's email, for audit logging
+  "role": "quality_control",           // REQUIRED: the user's admin role (website lib/roles.ts value) — gates tool access
   "model": "claude-fable-5"            // optional per-request override
 }
 ```
@@ -109,6 +110,26 @@ curl -N http://localhost:8787/api/chat \
   -d '{"messages":[{"role":"user","content":"How was the MIRCOM payment ref F9170 applied?"}]}'
 ```
 
+## Roles & tool access
+
+`role` (body field or `X-RSG-Role` header) must be one of the website's
+`lib/roles.ts` values — the list is mirrored (deliberately hardcoded) in
+`src/server/permissions.js`. Missing/unknown roles get a normal assistant
+message telling the user to speak with their manager (stopReason
+`permission_denied`) — never an HTTP error. Disallowed tools are invisible to
+the model and re-checked at dispatch.
+
+| Tool | super_admin / admin | finance / finance_manager | quality_control | customer_service |
+|---|:-:|:-:|:-:|:-:|
+| `qbo_landed_cost_report` | ✓ | ✓ | | |
+| `qbo_cash_application_lookup` | ✓ | ✓ | | |
+| `fulcrum_purchasing_request` | ✓ | ✓ | ✓ | |
+| `fulcrum_sales_request` | ✓ | ✓ | | ✓ |
+| `fulcrum_api_request` (unrestricted) | ✓ | | | |
+| `save_operational_note` | ✓ | ✓ | ✓ | ✓ |
+
+`GET /api/tools?role=<role>` returns the filtered list for a role.
+
 ## Current tools
 
 Organized by domain under `src/tools/`:
@@ -119,12 +140,14 @@ Organized by domain under `src/tools/`:
 - `qbo_cash_application_lookup` — how customer payments were applied to AR
   invoices (by customer, ref number, amount, date range, or invoice number).
 
-**fulcrum/** (customer service & operations)
-- `fulcrum_api_request` — general-purpose READ-ONLY access to the Fulcrum Pro
-  ERP API (sales orders, shipments/tracking, invoices, customers, items, jobs).
-  The agent explores endpoints and chains calls on its own; mutations are
-  refused at the client layer (GET and POST .../list only). Requires SSM
-  `/rsg-ai/prod/fulcrum-api-key` (or `FULCRUM_API_KEY` env).
+**fulcrum/** (read-only at the client layer: GET + POST `.../list` only;
+key from SSM `/rsg-ai/prod/fulcrum-api-key` or `FULCRUM_API_KEY` env)
+- `fulcrum_purchasing_request` — purchasing/receiving/quality scope: POs and
+  line items, receiving receipts (packing slips: received dates/quantities),
+  vendors, items/materials, inventory, CAPAs.
+- `fulcrum_sales_request` — sales/CS scope: sales orders and line items,
+  quotes, customers, shipments/tracking, Fulcrum invoices, production jobs.
+- `fulcrum_api_request` — the unrestricted explorer (admins only).
 
 **system/**
 - `save_operational_note` — the agent's self-improvement loop: durable
