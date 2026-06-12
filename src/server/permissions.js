@@ -23,7 +23,7 @@ export const TOOL_ACCESS = {
   qbo_cash_application_lookup: FINANCE,
   fulcrum_purchasing_request: ["quality_control", ...FINANCE],
   fulcrum_sales_request: ["customer_service", ...FINANCE],
-  fulcrum_api_request: UNRESTRICTED, // the unrestricted ERP explorer
+  fulcrum_api_request: FINANCE, // the unrestricted ERP explorer (read-only)
   save_operational_note: ALL,
 };
 

@@ -213,11 +213,11 @@ test("role permissions: matrix, validation, and messages", async () => {
   assert.ok(cs.includes("fulcrum_sales_request"));
   assert.ok(!cs.includes("fulcrum_purchasing_request"));
 
-  const fin = toolNamesForRole("finance");
-  assert.ok(fin.includes("qbo_landed_cost_report") && fin.includes("fulcrum_purchasing_request") && fin.includes("fulcrum_sales_request"));
-  assert.ok(!fin.includes("fulcrum_api_request"));
-
-  assert.ok(toolNamesForRole("super_admin").includes("fulcrum_api_request"));
+  // finance roles get every registered tool, same as super_admin
+  const allToolNames = tools.map((t) => t.definition.name).sort();
+  for (const role of ["finance", "finance_manager", "super_admin"]) {
+    assert.deepEqual(toolNamesForRole(role).sort(), allToolNames, `${role} should have all tools`);
+  }
   assert.deepEqual(toolNamesForRole("intern"), []);
   assert.match(PERMISSION_MESSAGE, /manager/);
 });
