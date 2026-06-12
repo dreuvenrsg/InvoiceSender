@@ -10,6 +10,7 @@
 import fs from "node:fs";
 import path from "node:path";
 import { QboClient } from "./qbo/client.js";
+import { FulcrumClient } from "./fulcrum/client.js";
 import { tools, getTool } from "./tools/index.js";
 
 function usage() {
@@ -37,10 +38,10 @@ async function main() {
   }
 
   const input = json ? JSON.parse(json) : {};
-  console.error(`[cli] Refreshing QBO token...`);
-  const qbo = await QboClient.create();
+  console.error(`[cli] Initializing QBO + Fulcrum clients...`);
+  const [qbo, fulcrum] = await Promise.all([QboClient.create(), FulcrumClient.create()]);
   console.error(`[cli] Running ${name}...`);
-  const result = await tool.run(input, { qbo });
+  const result = await tool.run(input, { qbo, fulcrum });
 
   if (result && typeof result.csv === "string") {
     const stamp = new Date().toISOString().replace(/[:.]/g, "-").slice(0, 19);

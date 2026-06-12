@@ -3,8 +3,8 @@ import assert from "node:assert/strict";
 
 import { allocateCents, allocationWeights, toCents } from "../src/lib/allocation.js";
 import { toCsv } from "../src/lib/csv.js";
-import { classifyOverhead, partFromDescription, parseLine, processTxn } from "../src/tools/landedCost.js";
-import { summarizePayment } from "../src/tools/cashApplication.js";
+import { classifyOverhead, partFromDescription, parseLine, processTxn } from "../src/tools/accounting/landedCost.js";
+import { summarizePayment } from "../src/tools/accounting/cashApplication.js";
 import { toolDefinitions, getTool } from "../src/tools/index.js";
 
 // ---------- allocation ----------
@@ -211,7 +211,7 @@ test("summarizePayment maps linked invoices and amounts", () => {
 
 test("tool definitions are valid Anthropic tool-use shapes", () => {
   const defs = toolDefinitions();
-  assert.equal(defs.length, 2);
+  assert.equal(defs.length, 3);
   for (const d of defs) {
     assert.match(d.name, /^[a-z0-9_]+$/);
     assert.ok(d.description.length > 20);
@@ -235,4 +235,42 @@ test("toCsv quotes commas and quotes", () => {
 test("toCents rounds float money safely", () => {
   assert.equal(toCents(19.99), 1999);
   assert.equal(toCents(0.1 + 0.2), 30);
+});
+
+// ---------- fulcrum ----------
+
+import { isReadOnlyRequest } from "../src/fulcrum/client.js";
+import { fitForModel } from "../src/tools/fulcrum/apiRequest.js";
+
+test("fulcrum read-only guard allows GET and POST list, refuses mutations", () => {
+  assert.equal(isReadOnlyRequest("GET", "/shipments/abc123"), true);
+  assert.equal(isReadOnlyRequest("POST", "/invoices/list"), true);
+  assert.equal(isReadOnlyRequest("POST", "/shipments/list?Skip=0&Take=50"), true);
+  assert.equal(isReadOnlyRequest("POST", "/invoices"), false);
+  assert.equal(isReadOnlyRequest("POST", "/invoices/create"), false);
+  assert.equal(isReadOnlyRequest("PUT", "/shipments/abc"), false);
+  assert.equal(isReadOnlyRequest("DELETE", "/shipments/abc"), false);
+  assert.equal(isReadOnlyRequest("POST", "/listings"), false); // "list" must be a path segment
+});
+
+test("fitForModel passes small payloads and truncates big arrays with a note", () => {
+  const small = { data: [{ a: 1 }] };
+  assert.deepEqual(fitForModel(small), { payload: small, truncated: false });
+
+  const big = Array.from({ length: 5000 }, (_, i) => ({ id: i, pad: "x".repeat(50) }));
+  const { payload, truncated } = fitForModel(big);
+  assert.equal(truncated, true);
+  assert.ok(payload.rowsShown < 5000);
+  assert.equal(payload.totalRowsReturnedByApi, 5000);
+  assert.ok(JSON.stringify(payload.rows).length <= 35000);
+  assert.ok(payload.note.includes("Skip/Take"));
+
+  const bigObject = { blob: "y".repeat(100000) };
+  const r2 = fitForModel(bigObject);
+  assert.equal(r2.truncated, true);
+  assert.ok(r2.payload.json.length <= 35000);
+});
+
+test("registry includes the fulcrum tool", () => {
+  assert.ok(getTool("fulcrum_api_request"));
 });

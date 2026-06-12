@@ -98,10 +98,20 @@ curl -N http://localhost:8787/api/chat \
 
 ## Current tools
 
+Organized by domain under `src/tools/`:
+
+**accounting/**
 - `qbo_landed_cost_report` — per-part purchasing spend with freight/tariff/fee/tax
   allocation; emits the full table as a CSV `artifact`.
 - `qbo_cash_application_lookup` — how customer payments were applied to AR
   invoices (by customer, ref number, amount, date range, or invoice number).
+
+**fulcrum/** (customer service & operations)
+- `fulcrum_api_request` — general-purpose READ-ONLY access to the Fulcrum Pro
+  ERP API (sales orders, shipments/tracking, invoices, customers, items, jobs).
+  The agent explores endpoints and chains calls on its own; mutations are
+  refused at the client layer (GET and POST .../list only). Requires SSM
+  `/rsg-ai/prod/fulcrum-api-key` (or `FULCRUM_API_KEY` env).
 
 New tools added to `src/tools/index.js` appear automatically — no interface
 changes needed beyond whatever you render from `/api/tools`.

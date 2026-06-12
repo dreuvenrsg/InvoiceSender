@@ -8,6 +8,7 @@
 //      RSG_AI_API_KEY (required outside dev), RSG_AI_CORS_ORIGIN (dev only).
 import http from "node:http";
 import { QboClient } from "../qbo/client.js";
+import { FulcrumClient } from "../fulcrum/client.js";
 import { toolDefinitions } from "../tools/index.js";
 import { runAgentTurn, resolveAnthropicClient, DEFAULT_MODEL } from "./agentLoop.js";
 
@@ -63,6 +64,11 @@ export function createServer({ apiKey = process.env.RSG_AI_API_KEY, corsOrigin =
     qboPromise = null;
     throw err;
   }));
+  let fulcrumPromise = null;
+  const getFulcrum = () => (fulcrumPromise ??= FulcrumClient.create().catch((err) => {
+    fulcrumPromise = null;
+    throw err;
+  }));
 
   return http.createServer(async (req, res) => {
     const url = new URL(req.url, "http://localhost");
@@ -102,12 +108,12 @@ export function createServer({ apiKey = process.env.RSG_AI_API_KEY, corsOrigin =
         if (corsOrigin) headers["Access-Control-Allow-Origin"] = corsOrigin;
         res.writeHead(200, headers);
 
-        const [anthropic, qbo] = await Promise.all([getAnthropic(), getQbo()]);
+        const [anthropic, qbo, fulcrum] = await Promise.all([getAnthropic(), getQbo(), getFulcrum()]);
         const { newMessages, stopReason, usage } = await runAgentTurn({
           client: anthropic,
           messages: body.messages,
           model: body.model || DEFAULT_MODEL,
-          ctx: { qbo },
+          ctx: { qbo, fulcrum },
           onEvent: (event) => res.write(sseEncode(event)),
         });
         res.write(sseEncode({ type: "turn_complete", newMessages, stopReason, usage }));

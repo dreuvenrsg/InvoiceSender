@@ -1,13 +1,16 @@
-// Tool registry for the RSG accounting tools.
+// Tool registry for the RSG AI tools, organized by domain:
+//   accounting/ — QBO analyses (AP landed cost, AR cash application)
+//   fulcrum/    — Fulcrum Pro ERP access (orders, shipments, production)
 // Each tool exports { definition, run } where `definition` is an Anthropic
 // tool-use definition ({ name, description, input_schema }) and
-// `run(input, ctx)` executes it. ctx carries shared clients: { qbo }.
-// A future "RSG AI" can pass `toolDefinitions()` straight into a Claude
-// `tools` array and dispatch tool_use blocks through `runTool()`.
-import landedCost from "./landedCost.js";
-import cashApplication from "./cashApplication.js";
+// `run(input, ctx)` executes it. ctx carries shared clients: { qbo, fulcrum }.
+// The RSG AI agent (src/server/) and any future surface (MCP connector,
+// website) consume this same registry.
+import landedCost from "./accounting/landedCost.js";
+import cashApplication from "./accounting/cashApplication.js";
+import fulcrumApiRequest from "./fulcrum/apiRequest.js";
 
-export const tools = [landedCost, cashApplication];
+export const tools = [landedCost, cashApplication, fulcrumApiRequest];
 
 export function toolDefinitions() {
   return tools.map((t) => t.definition);

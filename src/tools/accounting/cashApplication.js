@@ -1,8 +1,8 @@
 // qbo_cash_application_lookup — inspect how customer payments (cash receipts)
 // were applied to AR invoices, so a payment can be compared line-by-line
 // against the customer's remittance advice.
-import { qboEscape } from "../qbo/client.js";
-import { toCents, fromCents } from "../lib/allocation.js";
+import { qboEscape } from "../../qbo/client.js";
+import { toCents, fromCents } from "../../lib/allocation.js";
 
 /** Pure: reshape a QBO Payment + invoice lookup map into a readable summary. */
 export function summarizePayment(payment, invoicesById = new Map()) {

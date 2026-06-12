@@ -5,8 +5,8 @@
 // Purchasing"); the real part number lives in the line description as a
 // "PART-NUMBER: description" prefix. Grouping therefore defaults to that
 // prefix, falling back to the full description, then the QBO item name.
-import { allocateCents, allocationWeights, toCents, fromCents } from "../lib/allocation.js";
-import { toCsv } from "../lib/csv.js";
+import { allocateCents, allocationWeights, toCents, fromCents } from "../../lib/allocation.js";
+import { toCsv } from "../../lib/csv.js";
 
 // Charges that are NOT merchandise overhead even though they say "fee"
 // (professional services, rent, etc. — they go to non-item spend instead).
