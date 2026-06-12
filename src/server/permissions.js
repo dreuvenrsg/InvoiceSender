@@ -10,11 +10,10 @@ export const ADMIN_ROLES = [
   "quality_control",
   "finance",
   "finance_manager",
-  "admin", // legacy — treated like super_admin
 ];
 
 const ALL = ADMIN_ROLES;
-const UNRESTRICTED = ["super_admin", "admin"];
+const UNRESTRICTED = ["super_admin"];
 const FINANCE = ["finance", "finance_manager", ...UNRESTRICTED];
 
 // Which roles may use each tool. Tools not listed here are denied to
