@@ -70,8 +70,18 @@ Messages use the standard Anthropic content-block format:
 ]}
 ```
 
-Max request size 30 MB. Supported uploads: PDF (`document`), images (`image`),
-plain text/CSV (send as a `text` block or `document` with `text/plain`).
+Max request size 30 MB. Send every upload as a standard base64 block with the
+file's MIME type — the backend normalizes before Claude sees it:
+
+| Upload | Send as | Backend behavior |
+|---|---|---|
+| PDF | `document`, `application/pdf` | Native passthrough |
+| PNG / JPG / GIF / WebP | `image` | Native; wrong/mislabeled media types auto-corrected by byte sniffing |
+| CSV / TXT / MD / JSON | `document`, `text/*` base64 | Decoded to text documents |
+| Excel `.xlsx` | `document`, xlsx MIME type | Converted server-side to per-sheet CSV text (capped with truncation note) |
+| Legacy `.xls` | same | Best-effort; unparseable files become an in-chat note asking for `.xlsx` |
+
+Conversion failures never 500 — they degrade to notes the agent relays.
 
 ### Response: Server-Sent Events
 

@@ -13,6 +13,7 @@ import { FulcrumClient } from "../fulcrum/client.js";
 import { toolDefinitions } from "../tools/index.js";
 import { runAgentTurn, resolveAnthropicClient, DEFAULT_MODEL } from "./agentLoop.js";
 import { createLogger, truncate, lastUserText } from "./log.js";
+import { normalizeMessages } from "./attachments.js";
 
 const MAX_BODY_BYTES = 30 * 1024 * 1024; // remittance PDFs ride in as base64
 
@@ -105,6 +106,7 @@ export function createServer({ apiKey = process.env.RSG_AI_API_KEY, corsOrigin =
           return json(res, 400, { error: "messages[] is required" }, corsOrigin);
         }
 
+        const messages = await normalizeMessages(body.messages);
         const user = (typeof body.user === "string" && body.user) || req.headers["x-rsg-user"] || "unknown";
         const model = body.model || DEFAULT_MODEL;
         const startedAt = Date.now();
@@ -113,8 +115,8 @@ export function createServer({ apiKey = process.env.RSG_AI_API_KEY, corsOrigin =
           requestId,
           user,
           model,
-          messageCount: body.messages.length,
-          question: truncate(lastUserText(body.messages), 500),
+          messageCount: messages.length,
+          question: truncate(lastUserText(messages), 500),
         });
 
         const headers = {
@@ -130,7 +132,7 @@ export function createServer({ apiKey = process.env.RSG_AI_API_KEY, corsOrigin =
         const [anthropic, qbo, fulcrum] = await Promise.all([getAnthropic(), getQbo(), getFulcrum()]);
         const { newMessages, stopReason, usage } = await runAgentTurn({
           client: anthropic,
-          messages: body.messages,
+          messages,
           model,
           ctx: { qbo, fulcrum },
           onEvent: (event) => {

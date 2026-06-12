@@ -110,3 +110,75 @@ test("log helpers: truncate and lastUserText", async () => {
   assert.ok(rec.ts);
   fs.rmSync(tmp, { force: true });
 });
+
+test("attachment normalization: images, pdf, text, xlsx", async () => {
+  const { normalizeMessages, xlsxToCsvText } = await import("../src/server/attachments.js");
+  const ExcelJS = (await import("exceljs")).default;
+
+  // Build a real workbook fixture
+  const wb = new ExcelJS.Workbook();
+  const ws = wb.addWorksheet("Remit");
+  ws.addRow(["Invoice", "Amount"]);
+  ws.addRow(["F1001", 496.3]);
+  ws.addRow(["F1004, partial", 48.8]); // comma forces CSV quoting
+  const xlsxB64 = Buffer.from(await wb.xlsx.writeBuffer()).toString("base64");
+
+  const [msg] = await normalizeMessages([
+    {
+      role: "user",
+      content: [
+        { type: "image", source: { type: "base64", media_type: "image/jpg", data: "abc" } },
+        { type: "image", source: { type: "base64", media_type: "image/png", data: "abc" } },
+        { type: "document", source: { type: "base64", media_type: "application/pdf", data: "abc" }, title: "remit.pdf" },
+        { type: "document", source: { type: "base64", media_type: "text/csv", data: Buffer.from("a,b\n1,2").toString("base64") }, title: "data.csv" },
+        { type: "document", source: { type: "base64", media_type: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet", data: xlsxB64 }, title: "remit.xlsx" },
+        { type: "text", text: "check this" },
+      ],
+    },
+  ]);
+
+  const [jpg, png, pdf, csv, xlsx, text] = msg.content;
+  assert.equal(jpg.source.media_type, "image/jpeg"); // repaired ("abc" sniffs as nothing -> declared type fixed)
+  assert.equal(png.source.media_type, "image/png"); // untouched
+  assert.equal(pdf.source.media_type, "application/pdf"); // native passthrough
+  assert.equal(csv.source.type, "text"); // decoded
+  assert.ok(csv.source.data.includes("a,b"));
+  assert.equal(xlsx.source.type, "text"); // converted
+  assert.ok(xlsx.source.data.includes("## Sheet: Remit"));
+  assert.ok(xlsx.source.data.includes("F1001,496.3"));
+  assert.ok(xlsx.source.data.includes('"F1004, partial"')); // CSV quoting
+  assert.equal(text.text, "check this"); // untouched
+
+  // Garbage spreadsheet degrades to a note, not a throw
+  const [bad] = await normalizeMessages([
+    { role: "user", content: [{ type: "document", source: { type: "base64", media_type: "application/vnd.ms-excel", data: Buffer.from("not a workbook").toString("base64") }, title: "old.xls" }] },
+  ]);
+  assert.equal(bad.content[0].source.type, "text");
+  assert.match(bad.content[0].source.data, /could not be parsed/);
+
+  // Truncation cap honored
+  const big = new ExcelJS.Workbook();
+  const s2 = big.addWorksheet("Big");
+  for (let i = 0; i < 500; i++) s2.addRow([`row-${i}`, "x".repeat(100)]);
+  const out = await xlsxToCsvText(Buffer.from(await big.xlsx.writeBuffer()), { maxChars: 5000 });
+  assert.ok(out.length < 6000);
+  assert.match(out, /truncated/);
+
+  // String-content messages pass through untouched
+  const [plain] = await normalizeMessages([{ role: "user", content: "hello" }]);
+  assert.equal(plain.content, "hello");
+});
+
+test("attachment normalization sniffs real bytes over the declared type", async () => {
+  const { normalizeMessages, sniffBase64Type } = await import("../src/server/attachments.js");
+  const pngB64 = "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg==";
+  assert.equal(sniffBase64Type(pngB64), "image/png");
+  assert.equal(sniffBase64Type("JVBERi0xLjQ="), "application/pdf");
+  assert.equal(sniffBase64Type("zzzz"), null);
+
+  // PNG bytes labeled image/jpeg -> corrected to image/png
+  const [msg] = await normalizeMessages([
+    { role: "user", content: [{ type: "image", source: { type: "base64", media_type: "image/jpeg", data: pngB64 } }] },
+  ]);
+  assert.equal(msg.content[0].source.media_type, "image/png");
+});

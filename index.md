@@ -48,6 +48,7 @@ add, remove, or repurpose a file, update its entry in the same PR.
 | `src/server/agentLoop.js` | The Claude tool-use loop: streaming, tool dispatch, result summarization, artifacts |
 | `src/server/systemPrompt.js` | Base prompt + runtime composition of the knowledge files |
 | `src/server/log.js` | JSONL audit logger (requestId, user, timings, usage) |
+| `src/server/attachments.js` | Upload normalization: byte-sniffed media types, text decode, Excel→CSV conversion |
 | `src/server/knowledge/accounting.md` | Curated: QBO bookkeeping conventions (part-number prefixes, overhead lines) |
 | `src/server/knowledge/fulcrum.md` | Curated: Fulcrum API behavior (list conventions, **sorting ignored**, lookup trails) |
 | `src/server/knowledge/learned.md` | Agent-written notes via `save_operational_note`; review via git diff |
