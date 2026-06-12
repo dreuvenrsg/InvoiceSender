@@ -65,13 +65,21 @@ if ! aws iam get-role --role-name rsg-ai-ec2 >/dev/null 2>&1; then
           \"arn:aws:ssm:${REGION}:${ACCOUNT}:parameter/qbo-invoice-sender/*\"
         ]},
         {\"Effect\": \"Allow\", \"Action\": \"ssm:PutParameter\", \"Resource\":
-          \"arn:aws:ssm:${REGION}:${ACCOUNT}:parameter/qbo-invoice-sender/prod/refresh-token\"}
+          \"arn:aws:ssm:${REGION}:${ACCOUNT}:parameter/qbo-invoice-sender/prod/refresh-token\"},
+        {\"Effect\": \"Allow\", \"Action\": [\"logs:CreateLogStream\", \"logs:PutLogEvents\", \"logs:DescribeLogStreams\"], \"Resource\":
+          \"arn:aws:logs:${REGION}:${ACCOUNT}:log-group:/rsg-ai/prod*\"}
       ]
     }"
   aws iam create-instance-profile --instance-profile-name rsg-ai-ec2 >/dev/null
   aws iam add-role-to-instance-profile --instance-profile-name rsg-ai-ec2 --role-name rsg-ai-ec2
   echo "    created role rsg-ai-ec2 (waiting for propagation)"; sleep 12
 fi
+
+# Container logs stream here via the compose file's awslogs driver. Pre-created
+# (no awslogs-create-group) so a missing IAM grant fails loudly at container start.
+echo "==> CloudWatch log group /rsg-ai/prod"
+aws logs create-log-group --log-group-name /rsg-ai/prod --region "$REGION" 2>/dev/null || true
+aws logs put-retention-policy --log-group-name /rsg-ai/prod --retention-in-days 90 --region "$REGION"
 
 echo "==> Security group (80/443 only; shell via SSM Session Manager)"
 VPC_ID=$(aws ec2 describe-vpcs --filters Name=is-default,Values=true \

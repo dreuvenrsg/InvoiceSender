@@ -1,10 +1,25 @@
 # RSG AI on a tiny EC2 box: agent container + Caddy for automatic HTTPS.
 # Lives at /opt/rsg-ai/docker-compose.yml on the instance; run via run.sh,
 # which exports IMAGE, DOMAIN, and RSG_AI_API_KEY (from SSM) before compose.
+#
+# Logs stream to CloudWatch (group /rsg-ai/prod, 90-day retention) via the
+# awslogs driver — the default json-file driver loses history every deploy
+# (the file dies with the container) and grows unbounded. The instance role
+# carries the logs:* grant; the group is pre-created (no awslogs-create-group,
+# so a missing grant fails loudly at container start, not silently).
+# `docker logs` on the box still works via Docker's dual-logging cache.
+x-cloudwatch-logging: &cloudwatch-logging
+  driver: awslogs
+  options:
+    awslogs-region: us-west-1
+    awslogs-group: /rsg-ai/prod
+    tag: "{{.Name}}"   # stream per container name, stable across deploys
+
 services:
   rsg-ai:
     image: ${IMAGE}
     restart: unless-stopped
+    logging: *cloudwatch-logging
     environment:
       PORT: "8787"
       AWS_REGION: us-west-1
@@ -19,6 +34,7 @@ services:
   caddy:
     image: caddy:2
     restart: unless-stopped
+    logging: *cloudwatch-logging
     ports:
       - "80:80"
       - "443:443"

@@ -189,8 +189,22 @@ The interface MUST send the authenticated admin's identity per request (body
 `user` field, or `X-RSG-User` header) — otherwise logs show `user: "unknown"` —
 and SHOULD send its conversation id (body `chatId` field, or `X-RSG-Chat-Id`
 header) so all turns and tool calls of one chat can be pulled from the logs
-together (`docker logs rsg-ai-rsg-ai-1 | grep <chatId>`); without it,
-`chatId` logs as `null` and turns can only be correlated one requestId at a time.
+together; without it, `chatId` logs as `null` and turns can only be
+correlated one requestId at a time.
+
+In production the container's stdout streams to CloudWatch Logs — group
+`/rsg-ai/prod` (us-west-1, 90-day retention), stream `rsg-ai-rsg-ai-1` — so
+logs survive deploys. Pull one conversation:
+
+```bash
+aws logs filter-log-events --log-group-name /rsg-ai/prod --region us-west-1 \
+  --filter-pattern '"<chatId>"' --query 'events[].message' --output text
+```
+
+or query by field in CloudWatch Logs Insights (the records are JSON):
+`fields ts, type, tool, user | filter chatId = "<chatId>"`.
+`docker logs rsg-ai-rsg-ai-1` on the box still works (dual-logging cache)
+but only holds the current container's history.
 
 ## Integrating with RSG_Website (Next.js App Router + better-auth)
 
@@ -261,7 +275,9 @@ aws ssm get-parameter --name /rsg-ai/prod/api-key --with-decryption \
 ```
 
 Vercel env: `RSG_AI_URL=https://rsg-ai.rsgsecurity.com`, `RSG_AI_API_KEY=<value above>`.
-The audit JSONL is the agent container's stdout: `docker logs rsg-ai-rsg-ai-1`.
+The audit JSONL is the agent container's stdout, shipped to CloudWatch Logs
+group `/rsg-ai/prod` (see "Logging & audit" above); `docker logs rsg-ai-rsg-ai-1`
+on the box shows the current container's slice of it.
 
 **Graduation path: ECS Fargate + ALB** (~$35/mo, zero-ops) — template kept at
 `deploy/rsg-ai-service.yaml`, deployed with `npm run rsg-ai:deploy`, for when
