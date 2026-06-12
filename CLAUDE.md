@@ -4,7 +4,12 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Project Overview
 
-RSG Invoice Processor is an AWS Lambda (SAM) automation that processes invoices in two stages on a daily schedule (5:00 PM `America/Los_Angeles`). It is effectively a two-file application plus SAM infra.
+**AccountingAutomation** (formerly InvoiceSender) is RSG's accounting automation and AI backend. It has two halves:
+
+1. **Invoice processor** — an AWS Lambda (SAM) automation that processes invoices in two stages on a daily schedule (5:00 PM `America/Los_Angeles`), described below.
+2. **Accounting tools + RSG AI agent API** — a modular QBO analysis tool layer and the agent backend for the team-facing chat interface (see "Accounting Tools (`src/`)" below).
+
+The invoice processor is effectively a two-file application plus SAM infra.
 
 1. **Fulcrum stage** (`fulcrumProcessor.js`) — Puppeteer browser automation that logs into Fulcrum, finds "NEEDS ACTION" invoices, and creates/issues them per business rules.
 2. **QBO stage** (`V2_emailSender.js`) — also the Lambda handler/orchestrator. Refreshes the QBO OAuth token, fetches unissued invoices, validates shipping status via the Fulcrum API, updates PO numbers, and emails the sendable ones to customers. Finishes by sending an SES summary email of both stages.
@@ -37,6 +42,21 @@ npm run info       # describe the CloudFormation stack
 ```
 
 Before marking a code change complete: run `npm test`; run `npm run build` for SAM/packaging changes; run `node V2_emailSender.js` for local behavior when credentials are available. If a change touches Fulcrum browser automation, note whether interactive local verification was performed.
+
+## Accounting Tools (`src/`)
+
+A standalone, modular tool layer (separate from the invoice-sender monolith) exposing QBO accounting analyses as Anthropic tool-use definitions, intended to back a future admin-only "RSG AI". It does NOT import `V2_emailSender.js`.
+
+```bash
+node src/cli.js list                                          # list tools
+node src/cli.js qbo_landed_cost_report '{"months":12}'        # CSV lands in artifacts/
+node src/cli.js qbo_cash_application_lookup '{"customer":"MIRCOM INC."}'
+```
+
+- `src/qbo/` — read-focused QBO client. Client id/secret come from env or SSM (`/qbo-invoice-sender/prod/client-id`, `.../client-secret`); the refresh token is the **same SSM parameter the Lambda uses**, and rotation is written back, so the two stay in sync.
+- `src/tools/` — one module per tool exporting `{ definition, run }`; register new tools in `src/tools/index.js`. Keep business math in pure exported functions covered by `tests/accountingTools.test.js`.
+- `src/server/` — the **RSG AI agent API** (`npm run rsg-ai`): a Claude tool-use agent loop (`agentLoop.js`, default model `claude-opus-4-8`, override with `RSG_AI_MODEL`) behind an SSE HTTP API (`index.js`). The website chat interface lives in a separate repo and talks to this — the contract is `docs/rsg-ai-api.md`; keep that doc updated when the API changes. Auth: `RSG_AI_API_KEY` bearer secret. Anthropic key: `ANTHROPIC_API_KEY` env or SSM `/rsg-ai/prod/anthropic-api-key`. Domain knowledge for the agent lives in `src/server/systemPrompt.js` — update it when bookkeeping conventions or tools change. Server tests: `tests/agentServer.test.js`.
+- **Data conventions that shape any AP analysis:** bills book nearly everything to the single QBO item "COGS Purchasing"; real part numbers are `PART-NUMBER: description` prefixes in line Descriptions, and freight/tariff/tax charges also appear as description-only lines. Most tariff/freight spend sits on bills with no part lines (broker/carrier bills) and lands in the report's `unallocatedOverhead` bucket.
 
 ## Architecture & Non-Obvious Details
 
