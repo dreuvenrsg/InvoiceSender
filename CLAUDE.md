@@ -99,6 +99,37 @@ When touching auth/token handling, move toward env vars or SSM rather than addin
 - IAM grants: SSM Get/Put on `/qbo-invoice-sender/*`, SES SendEmail, DynamoDB Put/DeleteItem on the lock table, CloudWatch Logs.
 - Schedule: `ScheduleV2` cron `0 17 * * ? *` in `America/Los_Angeles`.
 
+## Repo Conventions (mandatory upkeep)
+
+These are part of every change, not optional extras:
+
+1. **CLAUDE.md stays current.** Any major change (new feature, new tool, infra
+   change, renamed concept) updates the relevant section of this file in the
+   same PR.
+2. **Specs for major features.** Every major rollout has a numbered spec in
+   `specs/` (format in `specs/README.md`): problem, approach, a task breakdown
+   with checkboxes, verification, and follow-ups. Check tasks off as they
+   complete; record deferred work as unchecked follow-ups.
+3. **`index.md` stays current.** One-line description per tracked file; update
+   it whenever files are added, removed, or repurposed.
+4. **Comment for readability.** New modules get a header comment saying what
+   they are and why; non-obvious constraints get inline comments. Match the
+   existing comment density in `src/`.
+5. **Project invariants — respect these:**
+   - Agent capabilities are `{ definition, run }` modules under a domain folder
+     in `src/tools/`, registered in `src/tools/index.js`. Business math lives
+     in pure exported functions with unit tests.
+   - `src/` never imports the monolith (`V2_emailSender.js`/`fulcrumProcessor.js`),
+     and vice versa.
+   - Secrets live in SSM (env override allowed) — never hardcode new ones.
+   - Fulcrum access is read-only, enforced in `src/fulcrum/client.js` — never
+     weaken the guard or route mutations around it.
+   - Agent domain knowledge is markdown in `src/server/knowledge/`, not prose
+     in code. `learned.md` is agent-written; prune/promote via review.
+   - `docs/rsg-ai-api.md` is the website contract — any API change updates it
+     in the same PR.
+   - Money math uses integer cents (`src/lib/allocation.js`).
+
 ## Working Rules
 
 - Prefer small, targeted edits. Map of where things live:
