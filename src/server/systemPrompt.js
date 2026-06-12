@@ -21,8 +21,9 @@ function readLearnedNotes() {
   const target = learnedNotesPath();
   const repoCopy = path.join(KNOWLEDGE_DIR, "learned.md");
   try {
-    if (target !== repoCopy && !fs.existsSync(target)) {
-      // First run with externalized notes: seed from the repo copy.
+    if (target !== repoCopy && (!fs.existsSync(target) || fs.statSync(target).size === 0)) {
+      // First run with externalized notes (or an empty placeholder): seed
+      // from the repo copy.
       fs.mkdirSync(path.dirname(target), { recursive: true });
       fs.copyFileSync(repoCopy, target);
     }
