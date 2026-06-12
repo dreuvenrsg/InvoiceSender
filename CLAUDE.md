@@ -4,7 +4,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Project Overview
 
-**AccountingAutomation** (formerly InvoiceSender) is RSG's accounting automation and AI backend. It has two halves:
+**RSG_AI_Tools** (formerly InvoiceSender) is the backend for RSG AI — the company's internal AI assistant — plus the invoice automation it grew out of. It has two halves:
 
 1. **Invoice processor** — an AWS Lambda (SAM) automation that processes invoices in two stages on a daily schedule (5:00 PM `America/Los_Angeles`), described below.
 2. **Accounting tools + RSG AI agent API** — a modular QBO analysis tool layer and the agent backend for the team-facing chat interface (see "Accounting Tools (`src/`)" below).
