@@ -27,6 +27,7 @@ RSG_AI_API_KEY=<shared secret> ANTHROPIC_API_KEY=<anthropic key> npm run rsg-ai
 | `RSG_AI_MODEL` | no | `claude-opus-4-8` (default) or `claude-fable-5` |
 | `PORT` | no | Default `8787` |
 | `RSG_AI_CORS_ORIGIN` | no | Dev only — allows direct browser calls from one origin |
+| `RSG_AI_LOG_FILE` | no | Mirror the JSONL request log to a file (stdout always gets it) |
 | AWS credentials | yes | SSM read for QBO creds (`/qbo-invoice-sender/prod/*`), region `us-west-1` |
 
 ## Endpoints
@@ -47,7 +48,8 @@ Request body:
 ```jsonc
 {
   "messages": [ /* Anthropic MessageParam[] — see below */ ],
-  "model": "claude-fable-5"   // optional per-request override
+  "user": "sheffner@rsgsecurity.com",  // REQUIRED in practice: the authenticated admin's email, for audit logging
+  "model": "claude-fable-5"            // optional per-request override
 }
 ```
 
@@ -79,12 +81,13 @@ interleaved, then `done`, then exactly one `turn_complete`.
 
 | `type` | Payload | UI treatment |
 |---|---|---|
+| `request_accepted` | `{ requestId }` | First event; keep the requestId for support/debugging |
 | `text` | `{ text }` | Append delta to the assistant bubble |
 | `tool_use` | `{ name, input }` | Show "Running landed cost report…" status chip |
 | `tool_result` | `{ name, ok, error? }` | Resolve the status chip |
 | `artifact` | `{ name, contentType, content }` | Offer as a download (e.g. report CSV); content is the raw text |
 | `done` | `{ stopReason, usage }` | Final token usage for the turn |
-| `turn_complete` | `{ newMessages, stopReason, usage }` | **Append `newMessages` to your stored conversation** and send the whole thing back on the next user turn (they contain the tool_use/tool_result blocks the model needs for context) |
+| `turn_complete` | `{ requestId, newMessages, stopReason, usage }` | **Append `newMessages` to your stored conversation** and send the whole thing back on the next user turn (they contain the tool_use/tool_result blocks the model needs for context) |
 | `error` | `{ error }` | Show error state; stream ends |
 
 ### Example
@@ -137,3 +140,57 @@ point the learned notes at durable storage in deployments.
   keep the SSE connection open and show tool status chips for feedback.
 - The model is instructed to ask a clarifying question when a request is
   ambiguous — render that as a normal assistant message.
+
+## Logging & audit
+
+Every chat turn emits JSON lines to stdout (and `RSG_AI_LOG_FILE` if set),
+correlated by `requestId`:
+
+- `chat_request` — ts, requestId, **user**, model, message count, the question (truncated)
+- `tool_call` / `tool_result` — every tool invocation with inputs (truncated) and outcome
+- `chat_response` — duration, stop reason, token usage, response text (truncated)
+- `request_error` — failures, with path and message
+
+The interface MUST send the authenticated admin's identity per request (body
+`user` field, or `X-RSG-User` header) — otherwise logs show `user: "unknown"`.
+
+## Integrating with RSG_Website (Next.js App Router + better-auth)
+
+Keep the agent API private; the website talks to it only through a
+server-side route handler that (1) verifies the better-auth session and
+`role === "admin"`, (2) injects the bearer secret, (3) forwards the user's
+email, and (4) relays the SSE stream. Sketch (`app/api/rsg-ai/chat/route.ts`):
+
+```ts
+import { auth } from "@/lib/auth"; // adjust to the project's better-auth server instance
+import { headers } from "next/headers";
+
+export const dynamic = "force-dynamic";
+
+export async function POST(req: Request) {
+  const session = await auth.api.getSession({ headers: await headers() });
+  if (!session?.user || session.user.role !== "admin") {
+    return new Response("Forbidden", { status: 403 });
+  }
+  const body = await req.json();
+  const upstream = await fetch(`${process.env.RSG_AI_URL}/api/chat`, {
+    method: "POST",
+    headers: {
+      Authorization: `Bearer ${process.env.RSG_AI_API_KEY}`,
+      "Content-Type": "application/json",
+    },
+    body: JSON.stringify({ ...body, user: session.user.email }),
+  });
+  return new Response(upstream.body, {
+    status: upstream.status,
+    headers: { "Content-Type": "text/event-stream", "Cache-Control": "no-cache" },
+  });
+}
+```
+
+Website env: `RSG_AI_URL` (e.g. `http://localhost:8787` in dev) and
+`RSG_AI_API_KEY` (server-side only — never `NEXT_PUBLIC_`). The admin chat
+page consumes the proxied SSE stream per the event table above, stores the
+conversation (append `turn_complete.newMessages`), and offers `artifact`
+events as downloads. Conversation persistence and any per-user rate limiting
+belong to the website.

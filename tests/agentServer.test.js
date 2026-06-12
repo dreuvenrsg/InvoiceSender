@@ -76,3 +76,37 @@ test("save_operational_note appends to the learned notes file", async (t) => {
   const content = fs.readFileSync(tmp, "utf8");
   assert.match(content, /- \[\d{4}-\d{2}-\d{2}\] \(fulcrum\) Take caps at 50 even when asking for more\./);
 });
+
+test("log helpers: truncate and lastUserText", async () => {
+  const { truncate, lastUserText, createLogger } = await import("../src/server/log.js");
+  assert.equal(truncate("short"), "short");
+  const t = truncate("x".repeat(3000), 100);
+  assert.ok(t.startsWith("x".repeat(100)) && t.includes("[+2900 chars]"));
+  assert.equal(truncate({ a: 1 }, 100), '{"a":1}');
+
+  assert.equal(lastUserText([{ role: "user", content: "hi" }]), "hi");
+  assert.equal(
+    lastUserText([
+      { role: "user", content: "real question" },
+      { role: "assistant", content: [{ type: "tool_use", id: "1", name: "t", input: {} }] },
+      { role: "user", content: [{ type: "tool_result", tool_use_id: "1", content: "{}" }] },
+    ]),
+    "real question"
+  );
+  assert.equal(
+    lastUserText([{ role: "user", content: [{ type: "document", source: {} }] }]),
+    "[document/image upload]"
+  );
+
+  // createLogger writes JSONL to the file sink
+  const os = await import("node:os");
+  const fs = await import("node:fs");
+  const path = await import("node:path");
+  const tmp = path.join(os.tmpdir(), `rsgai-log-${process.pid}.jsonl`);
+  const log = createLogger(tmp);
+  log({ type: "chat_request", requestId: "r1", user: "test@rsgsecurity.com" });
+  const rec = JSON.parse(fs.readFileSync(tmp, "utf8").trim());
+  assert.equal(rec.user, "test@rsgsecurity.com");
+  assert.ok(rec.ts);
+  fs.rmSync(tmp, { force: true });
+});

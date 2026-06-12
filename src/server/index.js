@@ -7,10 +7,12 @@
 // Env: PORT (default 8787), RSG_AI_MODEL (default claude-opus-4-8),
 //      RSG_AI_API_KEY (required outside dev), RSG_AI_CORS_ORIGIN (dev only).
 import http from "node:http";
+import { randomUUID } from "node:crypto";
 import { QboClient } from "../qbo/client.js";
 import { FulcrumClient } from "../fulcrum/client.js";
 import { toolDefinitions } from "../tools/index.js";
 import { runAgentTurn, resolveAnthropicClient, DEFAULT_MODEL } from "./agentLoop.js";
+import { createLogger, truncate, lastUserText } from "./log.js";
 
 const MAX_BODY_BYTES = 30 * 1024 * 1024; // remittance PDFs ride in as base64
 
@@ -70,8 +72,11 @@ export function createServer({ apiKey = process.env.RSG_AI_API_KEY, corsOrigin =
     throw err;
   }));
 
+  const log = createLogger();
+
   return http.createServer(async (req, res) => {
     const url = new URL(req.url, "http://localhost");
+    const requestId = randomUUID();
     try {
       if (req.method === "OPTIONS" && corsOrigin) {
         res.writeHead(204, {
@@ -100,6 +105,18 @@ export function createServer({ apiKey = process.env.RSG_AI_API_KEY, corsOrigin =
           return json(res, 400, { error: "messages[] is required" }, corsOrigin);
         }
 
+        const user = (typeof body.user === "string" && body.user) || req.headers["x-rsg-user"] || "unknown";
+        const model = body.model || DEFAULT_MODEL;
+        const startedAt = Date.now();
+        log({
+          type: "chat_request",
+          requestId,
+          user,
+          model,
+          messageCount: body.messages.length,
+          question: truncate(lastUserText(body.messages), 500),
+        });
+
         const headers = {
           "Content-Type": "text/event-stream",
           "Cache-Control": "no-cache",
@@ -107,21 +124,43 @@ export function createServer({ apiKey = process.env.RSG_AI_API_KEY, corsOrigin =
         };
         if (corsOrigin) headers["Access-Control-Allow-Origin"] = corsOrigin;
         res.writeHead(200, headers);
+        res.write(sseEncode({ type: "request_accepted", requestId }));
 
+        let assistantText = "";
         const [anthropic, qbo, fulcrum] = await Promise.all([getAnthropic(), getQbo(), getFulcrum()]);
         const { newMessages, stopReason, usage } = await runAgentTurn({
           client: anthropic,
           messages: body.messages,
-          model: body.model || DEFAULT_MODEL,
+          model,
           ctx: { qbo, fulcrum },
-          onEvent: (event) => res.write(sseEncode(event)),
+          onEvent: (event) => {
+            if (event.type === "text") assistantText += event.text;
+            else if (event.type === "tool_use") {
+              log({ type: "tool_call", requestId, user, tool: event.name, input: truncate(event.input, 1000) });
+            } else if (event.type === "tool_result") {
+              log({ type: "tool_result", requestId, user, tool: event.name, ok: event.ok, error: event.error });
+            }
+            res.write(sseEncode(event));
+          },
         });
-        res.write(sseEncode({ type: "turn_complete", newMessages, stopReason, usage }));
+        log({
+          type: "chat_response",
+          requestId,
+          user,
+          model,
+          durationMs: Date.now() - startedAt,
+          stopReason,
+          usage,
+          responseChars: assistantText.length,
+          response: truncate(assistantText, 2000),
+        });
+        res.write(sseEncode({ type: "turn_complete", requestId, newMessages, stopReason, usage }));
         return res.end();
       }
 
       return json(res, 404, { error: "Not found" }, corsOrigin);
     } catch (err) {
+      log({ type: "request_error", requestId, path: url.pathname, error: err.message });
       console.error("[rsg-ai]", err);
       if (res.headersSent) {
         res.write(sseEncode({ type: "error", error: err.message }));
