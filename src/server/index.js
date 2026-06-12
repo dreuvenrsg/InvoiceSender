@@ -79,11 +79,14 @@ export function createServer({ apiKey = process.env.RSG_AI_API_KEY, corsOrigin =
   return http.createServer(async (req, res) => {
     const url = new URL(req.url, "http://localhost");
     const requestId = randomUUID();
+    // The interface's conversation id — tags every log line for a turn so a
+    // whole chat can be grepped out of the JSONL when debugging.
+    let chatId = null;
     try {
       if (req.method === "OPTIONS" && corsOrigin) {
         res.writeHead(204, {
           "Access-Control-Allow-Origin": corsOrigin,
-          "Access-Control-Allow-Headers": "Authorization, Content-Type",
+          "Access-Control-Allow-Headers": "Authorization, Content-Type, X-RSG-User, X-RSG-Role, X-RSG-Chat-Id",
           "Access-Control-Allow-Methods": "GET, POST, OPTIONS",
         });
         return res.end();
@@ -114,11 +117,13 @@ export function createServer({ apiKey = process.env.RSG_AI_API_KEY, corsOrigin =
         const messages = await normalizeMessages(body.messages);
         const user = (typeof body.user === "string" && body.user) || req.headers["x-rsg-user"] || "unknown";
         const role = (typeof body.role === "string" && body.role) || req.headers["x-rsg-role"] || null;
+        chatId = (typeof body.chatId === "string" && body.chatId) || req.headers["x-rsg-chat-id"] || null;
         const model = body.model || DEFAULT_MODEL;
         const startedAt = Date.now();
         log({
           type: "chat_request",
           requestId,
+          chatId,
           user,
           role,
           model,
@@ -133,15 +138,15 @@ export function createServer({ apiKey = process.env.RSG_AI_API_KEY, corsOrigin =
         };
         if (corsOrigin) headers["Access-Control-Allow-Origin"] = corsOrigin;
         res.writeHead(200, headers);
-        res.write(sseEncode({ type: "request_accepted", requestId }));
+        res.write(sseEncode({ type: "request_accepted", requestId, chatId }));
 
         // Unknown/missing role: a friendly in-chat denial, not an error.
         if (!isValidRole(role)) {
           const denial = [{ role: "assistant", content: [{ type: "text", text: PERMISSION_MESSAGE }] }];
           res.write(sseEncode({ type: "text", text: PERMISSION_MESSAGE }));
           res.write(sseEncode({ type: "done", stopReason: "permission_denied", usage: null }));
-          res.write(sseEncode({ type: "turn_complete", requestId, newMessages: denial, stopReason: "permission_denied", usage: null }));
-          log({ type: "chat_response", requestId, user, role, durationMs: Date.now() - startedAt, stopReason: "permission_denied" });
+          res.write(sseEncode({ type: "turn_complete", requestId, chatId, newMessages: denial, stopReason: "permission_denied", usage: null }));
+          log({ type: "chat_response", requestId, chatId, user, role, durationMs: Date.now() - startedAt, stopReason: "permission_denied" });
           return res.end();
         }
 
@@ -156,9 +161,9 @@ export function createServer({ apiKey = process.env.RSG_AI_API_KEY, corsOrigin =
           onEvent: (event) => {
             if (event.type === "text") assistantText += event.text;
             else if (event.type === "tool_use") {
-              log({ type: "tool_call", requestId, user, tool: event.name, input: truncate(event.input, 1000) });
+              log({ type: "tool_call", requestId, chatId, user, tool: event.name, input: truncate(event.input, 1000) });
             } else if (event.type === "tool_result") {
-              log({ type: "tool_result", requestId, user, tool: event.name, ok: event.ok, error: event.error });
+              log({ type: "tool_result", requestId, chatId, user, tool: event.name, ok: event.ok, error: event.error });
             }
             res.write(sseEncode(event));
           },
@@ -166,6 +171,7 @@ export function createServer({ apiKey = process.env.RSG_AI_API_KEY, corsOrigin =
         log({
           type: "chat_response",
           requestId,
+          chatId,
           user,
           role,
           model,
@@ -175,13 +181,13 @@ export function createServer({ apiKey = process.env.RSG_AI_API_KEY, corsOrigin =
           responseChars: assistantText.length,
           response: truncate(assistantText, 2000),
         });
-        res.write(sseEncode({ type: "turn_complete", requestId, newMessages, stopReason, usage }));
+        res.write(sseEncode({ type: "turn_complete", requestId, chatId, newMessages, stopReason, usage }));
         return res.end();
       }
 
       return json(res, 404, { error: "Not found" }, corsOrigin);
     } catch (err) {
-      log({ type: "request_error", requestId, path: url.pathname, error: err.message });
+      log({ type: "request_error", requestId, chatId, path: url.pathname, error: err.message });
       console.error("[rsg-ai]", err);
       if (res.headersSent) {
         res.write(sseEncode({ type: "error", error: err.message }));

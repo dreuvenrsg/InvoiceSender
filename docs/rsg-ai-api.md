@@ -50,6 +50,7 @@ Request body:
   "messages": [ /* Anthropic MessageParam[] — see below */ ],
   "user": "sheffner@rsgsecurity.com",  // REQUIRED in practice: the authenticated admin's email, for audit logging
   "role": "quality_control",           // REQUIRED: the user's admin role (website lib/roles.ts value) — gates tool access
+  "chatId": "cnv_8f3a…",               // REQUIRED in practice: the interface's conversation id — tags every backend log line (tool calls included) for debugging
   "model": "claude-fable-5"            // optional per-request override
 }
 ```
@@ -92,13 +93,13 @@ interleaved, then `done`, then exactly one `turn_complete`.
 
 | `type` | Payload | UI treatment |
 |---|---|---|
-| `request_accepted` | `{ requestId }` | First event; keep the requestId for support/debugging |
+| `request_accepted` | `{ requestId, chatId }` | First event; keep the requestId for support/debugging (chatId echoes what you sent) |
 | `text` | `{ text }` | Append delta to the assistant bubble |
 | `tool_use` | `{ name, input }` | Show "Running landed cost report…" status chip |
 | `tool_result` | `{ name, ok, error? }` | Resolve the status chip |
 | `artifact` | `{ name, contentType, content }` | Offer as a download (e.g. report CSV); content is the raw text |
 | `done` | `{ stopReason, usage }` | Final token usage for the turn |
-| `turn_complete` | `{ requestId, newMessages, stopReason, usage }` | **Append `newMessages` to your stored conversation** and send the whole thing back on the next user turn (they contain the tool_use/tool_result blocks the model needs for context) |
+| `turn_complete` | `{ requestId, chatId, newMessages, stopReason, usage }` | **Append `newMessages` to your stored conversation** and send the whole thing back on the next user turn (they contain the tool_use/tool_result blocks the model needs for context) |
 | `error` | `{ error }` | Show error state; stream ends |
 
 ### Example
@@ -177,15 +178,19 @@ point the learned notes at durable storage in deployments.
 ## Logging & audit
 
 Every chat turn emits JSON lines to stdout (and `RSG_AI_LOG_FILE` if set),
-correlated by `requestId`:
+correlated by `requestId` (one turn) and `chatId` (the whole conversation):
 
-- `chat_request` — ts, requestId, **user**, model, message count, the question (truncated)
-- `tool_call` / `tool_result` — every tool invocation with inputs (truncated) and outcome
+- `chat_request` — ts, requestId, **chatId**, **user**, model, message count, the question (truncated)
+- `tool_call` / `tool_result` — every tool invocation with inputs (truncated) and outcome, tagged with chatId
 - `chat_response` — duration, stop reason, token usage, response text (truncated)
 - `request_error` — failures, with path and message
 
 The interface MUST send the authenticated admin's identity per request (body
-`user` field, or `X-RSG-User` header) — otherwise logs show `user: "unknown"`.
+`user` field, or `X-RSG-User` header) — otherwise logs show `user: "unknown"` —
+and SHOULD send its conversation id (body `chatId` field, or `X-RSG-Chat-Id`
+header) so all turns and tool calls of one chat can be pulled from the logs
+together (`docker logs rsg-ai-rsg-ai-1 | grep <chatId>`); without it,
+`chatId` logs as `null` and turns can only be correlated one requestId at a time.
 
 ## Integrating with RSG_Website (Next.js App Router + better-auth)
 
@@ -205,7 +210,7 @@ export async function POST(req: Request) {
   if (!session?.user || session.user.role !== "admin") {
     return new Response("Forbidden", { status: 403 });
   }
-  const body = await req.json();
+  const body = await req.json(); // include chatId (your conversation id) so backend logs are tagged per-chat
   const upstream = await fetch(`${process.env.RSG_AI_URL}/api/chat`, {
     method: "POST",
     headers: {

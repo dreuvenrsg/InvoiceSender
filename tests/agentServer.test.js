@@ -183,6 +183,45 @@ test("attachment normalization sniffs real bytes over the declared type", async 
   assert.equal(msg.content[0].source.media_type, "image/png");
 });
 
+test("chatId tags SSE events and every JSONL log line for the turn", async (t) => {
+  const os = await import("node:os");
+  const fs = await import("node:fs");
+  const path = await import("node:path");
+  const { createServer } = await import("../src/server/index.js");
+
+  const tmp = path.join(os.tmpdir(), `rsgai-chatid-${process.pid}.jsonl`);
+  process.env.RSG_AI_LOG_FILE = tmp;
+  const server = createServer({ apiKey: "s3cret" });
+  t.after(() => { delete process.env.RSG_AI_LOG_FILE; fs.rmSync(tmp, { force: true }); server.close(); });
+  await new Promise((resolve) => server.listen(0, resolve));
+  const port = server.address().port;
+
+  // The permission-denied path runs the full request->log->SSE flow with no
+  // Anthropic/QBO/Fulcrum dependencies.
+  const res = await fetch(`http://localhost:${port}/api/chat`, {
+    method: "POST",
+    headers: { Authorization: "Bearer s3cret", "Content-Type": "application/json" },
+    body: JSON.stringify({ messages: [{ role: "user", content: "hi" }], user: "t@rsg.com", role: "intern", chatId: "cnv_test_123" }),
+  });
+  const sse = await res.text();
+  assert.match(sse, /"type":"request_accepted".*"chatId":"cnv_test_123"/);
+  assert.match(sse, /"type":"turn_complete".*"chatId":"cnv_test_123"/);
+
+  const records = fs.readFileSync(tmp, "utf8").trim().split("\n").map((l) => JSON.parse(l));
+  assert.ok(records.length >= 2); // chat_request + chat_response at minimum
+  for (const rec of records) assert.equal(rec.chatId, "cnv_test_123", `${rec.type} missing chatId`);
+
+  // Missing chatId logs as null rather than being dropped
+  fs.writeFileSync(tmp, "");
+  await fetch(`http://localhost:${port}/api/chat`, {
+    method: "POST",
+    headers: { Authorization: "Bearer s3cret", "Content-Type": "application/json" },
+    body: JSON.stringify({ messages: [{ role: "user", content: "hi" }], user: "t@rsg.com", role: "intern" }),
+  }).then((r) => r.text());
+  const noId = fs.readFileSync(tmp, "utf8").trim().split("\n").map((l) => JSON.parse(l));
+  for (const rec of noId) assert.equal(rec.chatId, null);
+});
+
 test("role permissions: matrix, validation, and messages", async () => {
   const { isValidRole, toolNamesForRole, PERMISSION_MESSAGE, ADMIN_ROLES, TOOL_ACCESS } = await import("../src/server/permissions.js");
   const { tools } = await import("../src/tools/index.js");
