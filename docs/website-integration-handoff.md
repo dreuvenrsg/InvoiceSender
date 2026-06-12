@@ -87,10 +87,11 @@ API — the website never touches them. Smoke test without the UI:
   question, tool calls, timings, usage) is on the backend; the website just
   supplies the user identity.
 - Model: `claude-opus-4-8` default (config knob; `claude-fable-5` available).
-- The agent API is **not deployed yet** — develop against localhost:8787.
-  Deployment target (likely small App Runner/EC2 in the us-west-1 account)
-  is a pending decision; coordinate before shipping the admin page to prod.
-  Generate a strong shared `RSG_AI_API_KEY` for prod at that point.
+- Deployment is ready: ECS Fargate behind an ALB via `npm run rsg-ai:deploy`
+  in RSG_AI_Tools (stack `rsg-ai-service`, us-west-1). The stack output
+  `ServiceUrl` becomes Vercel's `RSG_AI_URL`; the prod bearer key lives in
+  SSM `/rsg-ai/prod/api-key`. Develop against localhost:8787; point prod env
+  at the deployed URL (HTTPS via ACM cert recommended).
 
 ## Out of scope for the website session
 

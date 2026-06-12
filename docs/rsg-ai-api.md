@@ -194,3 +194,22 @@ page consumes the proxied SSE stream per the event table above, stores the
 conversation (append `turn_complete.newMessages`), and offers `artifact`
 events as downloads. Conversation persistence and any per-user rate limiting
 belong to the website.
+
+## Deployment (ECS Fargate)
+
+The agent API ships as its own service — it is NOT bundled into the website's
+Vercel deploy. `npm run rsg-ai:deploy` builds the Docker image, pushes to ECR,
+and deploys CloudFormation stack `rsg-ai-service` (us-west-1): Fargate service
+behind an ALB (idle timeout 900s for long agent turns), CloudWatch logs at
+`/ecs/rsg-ai` (the JSONL audit log), task IAM scoped to the SSM paths above.
+The production bearer key is auto-generated at `/rsg-ai/prod/api-key` — read
+it for Vercel with:
+
+```bash
+aws ssm get-parameter --name /rsg-ai/prod/api-key --with-decryption \
+  --region us-west-1 --query Parameter.Value --output text
+```
+
+Pass `CERT_ARN=<acm-arn>` to enable HTTPS (recommended before real use — put
+an ACM cert on e.g. `rsg-ai.rsgsecurity.com` and CNAME it to the ALB). The
+stack output `ServiceUrl` is what Vercel's `RSG_AI_URL` should point at.

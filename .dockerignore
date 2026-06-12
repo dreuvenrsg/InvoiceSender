@@ -1,0 +1,12 @@
+node_modules
+.aws-sam
+artifacts
+layers
+*.log
+*.png
+.env*
+.git
+tests
+docs
+events
+coverage
