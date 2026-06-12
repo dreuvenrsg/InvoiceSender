@@ -78,6 +78,7 @@ add, remove, or repurpose a file, update its entry in the same PR.
 | `specs/003-fulcrum-erp-access.md` | Read-only Fulcrum tool for CS/ops |
 | `specs/004-agent-knowledge-system.md` | Curated + agent-written operational notes |
 | `specs/005-deployment.md` | EC2 (live) + Fargate (graduation) deployment |
+| `specs/006-file-uploads.md` | Upload normalization: images/PDF/text/Excel |
 
 ## Tests
 
