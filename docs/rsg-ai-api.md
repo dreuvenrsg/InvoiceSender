@@ -195,21 +195,36 @@ conversation (append `turn_complete.newMessages`), and offers `artifact`
 events as downloads. Conversation persistence and any per-user rate limiting
 belong to the website.
 
-## Deployment (ECS Fargate)
+## Deployment
 
 The agent API ships as its own service — it is NOT bundled into the website's
-Vercel deploy. `npm run rsg-ai:deploy` builds the Docker image, pushes to ECR,
-and deploys CloudFormation stack `rsg-ai-service` (us-west-1): Fargate service
-behind an ALB (idle timeout 900s for long agent turns), CloudWatch logs at
-`/ecs/rsg-ai` (the JSONL audit log), task IAM scoped to the SSM paths above.
-The production bearer key is auto-generated at `/rsg-ai/prod/api-key` — read
-it for Vercel with:
+Vercel deploy.
+
+**Production host (current): tiny EC2** — t4g.nano + Elastic IP in us-west-1
+(~$5/mo), agent container + Caddy (automatic Let's Encrypt HTTPS) via
+docker compose. Scripts in `deploy/ec2/`:
+
+```bash
+bash deploy/ec2/launch.sh    # one-time provisioning (already run)
+bash deploy/ec2/update.sh    # ship current code: build arm64 -> ECR -> restart on host
+bash deploy/ec2/shell.sh 'docker logs --tail 100 rsg-ai-rsg-ai-1'   # remote debugging
+bash deploy/ec2/shell.sh     # interactive shell (needs session-manager-plugin)
+```
+
+- Live instance: `i-092a6fc728d363339`, Elastic IP `52.52.177.16`,
+  domain `rsg-ai.rsgsecurity.com` (A record -> the EIP; Caddy issues the cert).
+- Shell access is SSM Session Manager (no SSH keys, no port 22, IAM-audited).
+  One-shot mode needs nothing extra — ideal for Claude sessions debugging the box.
+- The production bearer key is auto-generated at SSM `/rsg-ai/prod/api-key`:
 
 ```bash
 aws ssm get-parameter --name /rsg-ai/prod/api-key --with-decryption \
   --region us-west-1 --query Parameter.Value --output text
 ```
 
-Pass `CERT_ARN=<acm-arn>` to enable HTTPS (recommended before real use — put
-an ACM cert on e.g. `rsg-ai.rsgsecurity.com` and CNAME it to the ALB). The
-stack output `ServiceUrl` is what Vercel's `RSG_AI_URL` should point at.
+Vercel env: `RSG_AI_URL=https://rsg-ai.rsgsecurity.com`, `RSG_AI_API_KEY=<value above>`.
+The audit JSONL is the agent container's stdout: `docker logs rsg-ai-rsg-ai-1`.
+
+**Graduation path: ECS Fargate + ALB** (~$35/mo, zero-ops) — template kept at
+`deploy/rsg-ai-service.yaml`, deployed with `npm run rsg-ai:deploy`, for when
+usage outgrows the single box.

@@ -1,0 +1,8 @@
+# Automatic HTTPS (Let's Encrypt) for the RSG AI agent API.
+# Certs issue automatically once the DOMAIN's DNS A record points at this box.
+{$DOMAIN} {
+	reverse_proxy rsg-ai:8787 {
+		# Stream SSE immediately; no response buffering.
+		flush_interval -1
+	}
+}
