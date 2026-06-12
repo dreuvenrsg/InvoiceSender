@@ -113,8 +113,22 @@ Organized by domain under `src/tools/`:
   refused at the client layer (GET and POST .../list only). Requires SSM
   `/rsg-ai/prod/fulcrum-api-key` (or `FULCRUM_API_KEY` env).
 
+**system/**
+- `save_operational_note` — the agent's self-improvement loop: durable
+  discoveries (API quirks, data conventions) are appended to
+  `src/server/knowledge/learned.md` and folded into its system prompt on
+  every subsequent turn.
+
 New tools added to `src/tools/index.js` appear automatically — no interface
 changes needed beyond whatever you render from `/api/tools`.
+
+## Teaching the agent (operational knowledge)
+
+The agent's system prompt is composed at runtime from `src/server/knowledge/*.md`:
+`accounting.md` and `fulcrum.md` are human-curated (edit + PR to teach it
+something), `learned.md` is agent-written. Review agent notes via git diff and
+promote stable ones into the curated files. `RSG_AI_LEARNED_NOTES_FILE` can
+point the learned notes at durable storage in deployments.
 
 ## Notes for the interface repo
 

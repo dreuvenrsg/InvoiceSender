@@ -3,7 +3,8 @@ import assert from "node:assert/strict";
 
 import { summarizeForModel, extractArtifacts, DEFAULT_MODEL } from "../src/server/agentLoop.js";
 import { isAuthorized, sseEncode } from "../src/server/index.js";
-import { SYSTEM_PROMPT } from "../src/server/systemPrompt.js";
+import { buildSystemPrompt } from "../src/server/systemPrompt.js";
+const SYSTEM_PROMPT = buildSystemPrompt();
 
 test("summarizeForModel strips csv and truncates long item lists", () => {
   const items = Array.from({ length: 250 }, (_, i) => ({ partNumber: `P-${i}` }));
@@ -52,4 +53,26 @@ test("system prompt carries the bookkeeping conventions the tools depend on", ()
 
 test("default model is a current Claude model id", () => {
   assert.match(DEFAULT_MODEL, /^claude-(opus-4-8|fable-5)$/);
+});
+
+test("system prompt includes knowledge files and the fulcrum sorting quirk", () => {
+  assert.ok(SYSTEM_PROMPT.includes("IGNORE server-side sorting"));
+  assert.ok(SYSTEM_PROMPT.includes("Learned notes (agent-written)"));
+  assert.ok(SYSTEM_PROMPT.includes("save_operational_note"));
+});
+
+test("save_operational_note appends to the learned notes file", async (t) => {
+  const os = await import("node:os");
+  const fs = await import("node:fs");
+  const path = await import("node:path");
+  const { run, learnedNotesPath } = await import("../src/tools/system/saveNote.js");
+  const tmp = path.join(os.tmpdir(), `learned-test-${process.pid}.md`);
+  process.env.RSG_AI_LEARNED_NOTES_FILE = tmp;
+  t.after(() => { delete process.env.RSG_AI_LEARNED_NOTES_FILE; fs.rmSync(tmp, { force: true }); });
+
+  assert.equal(learnedNotesPath(), tmp);
+  const res = await run({ topic: "fulcrum", note: "Take caps at 50\neven when asking for more." });
+  assert.equal(res.saved, true);
+  const content = fs.readFileSync(tmp, "utf8");
+  assert.match(content, /- \[\d{4}-\d{2}-\d{2}\] \(fulcrum\) Take caps at 50 even when asking for more\./);
 });

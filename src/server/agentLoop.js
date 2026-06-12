@@ -5,7 +5,7 @@ import Anthropic from "@anthropic-ai/sdk";
 import { SSMClient, GetParameterCommand } from "@aws-sdk/client-ssm";
 import { REGION } from "../qbo/config.js";
 import { toolDefinitions, getTool } from "../tools/index.js";
-import { SYSTEM_PROMPT } from "./systemPrompt.js";
+import { buildSystemPrompt } from "./systemPrompt.js";
 
 export const DEFAULT_MODEL = process.env.RSG_AI_MODEL || "claude-opus-4-8";
 export const ANTHROPIC_KEY_PARAM = "/rsg-ai/prod/anthropic-api-key";
@@ -68,7 +68,7 @@ export async function runAgentTurn({ client, messages, ctx, onEvent = () => {}, 
       max_tokens: 64000,
       thinking: { type: "adaptive" },
       output_config: { effort: "high" },
-      system: SYSTEM_PROMPT,
+      system: buildSystemPrompt(),
       tools: toolDefinitions(),
       messages: convo,
     });
