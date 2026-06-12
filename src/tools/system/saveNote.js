@@ -5,11 +5,9 @@
 // curated knowledge files.
 import fs from "node:fs";
 import path from "node:path";
-import { KNOWLEDGE_DIR } from "../../server/systemPrompt.js";
+import { learnedNotesPath } from "../../server/systemPrompt.js";
 
-export function learnedNotesPath() {
-  return process.env.RSG_AI_LEARNED_NOTES_FILE || path.join(KNOWLEDGE_DIR, "learned.md");
-}
+export { learnedNotesPath };
 
 export const definition = {
   name: "save_operational_note",

@@ -10,6 +10,11 @@ export DOMAIN=$(cat /opt/rsg-ai/domain)
 export RSG_AI_API_KEY=$(aws ssm get-parameter --name /rsg-ai/prod/api-key \
   --with-decryption --query Parameter.Value --output text --region "$REGION")
 
+# Learned-notes volume: must exist and be writable by the container's
+# unprivileged user (node = uid 1000) or save_operational_note EACCESes.
+mkdir -p /opt/rsg-ai/knowledge
+chown -R 1000:1000 /opt/rsg-ai/knowledge
+
 ECR_HOST=${IMAGE%%/*}
 aws ecr get-login-password --region "$REGION" | docker login --username AWS --password-stdin "$ECR_HOST"
 

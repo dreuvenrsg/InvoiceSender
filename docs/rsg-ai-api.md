@@ -119,7 +119,7 @@ message telling the user to speak with their manager (stopReason
 `permission_denied`) — never an HTTP error. Disallowed tools are invisible to
 the model and re-checked at dispatch.
 
-| Tool | super_admin / admin | finance / finance_manager | quality_control | customer_service |
+| Tool | super_admin | finance / finance_manager | quality_control | customer_service |
 |---|:-:|:-:|:-:|:-:|
 | `qbo_landed_cost_report` | ✓ | ✓ | | |
 | `qbo_cash_application_lookup` | ✓ | ✓ | | |

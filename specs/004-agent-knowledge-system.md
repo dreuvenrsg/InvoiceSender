@@ -40,5 +40,9 @@ correct answer, agent cited the note in its reasoning.
 ## Follow-ups
 
 - [ ] Periodic human review of `learned.md` (prune wrong/stale, promote stable)
-- [ ] If the host ever becomes ephemeral/multi-instance, move learned notes to
-      durable shared storage (S3/DynamoDB) behind the existing env override
+- [x] Durable storage (2026-06-12): notes write to a host volume on EC2
+      (`/opt/rsg-ai/knowledge`, seeded from the repo copy) — fixed after the
+      first prod save failed (read-only container path) and the discovery was
+      recovered from audit logs
+- [ ] Periodically sync prod learned notes back into git for review
+      (`deploy/ec2/shell.sh 'cat /opt/rsg-ai/knowledge/learned.md'`)

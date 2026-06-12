@@ -241,3 +241,26 @@ test("scoped fulcrum tools enforce their namespaces", async () => {
     /outside this tool's scope/
   );
 });
+
+test("learned notes from the env-override path are folded into the prompt", async (t) => {
+  const os = await import("node:os");
+  const fs = await import("node:fs");
+  const path = await import("node:path");
+  const { buildSystemPrompt } = await import("../src/server/systemPrompt.js");
+  const tmp = path.join(os.tmpdir(), `learned-prompt-${process.pid}.md`);
+  fs.writeFileSync(tmp, "- [2026-06-12] (fulcrum) MARKER_NOTE_FROM_VOLUME");
+  process.env.RSG_AI_LEARNED_NOTES_FILE = tmp;
+  t.after(() => { delete process.env.RSG_AI_LEARNED_NOTES_FILE; fs.rmSync(tmp, { force: true }); });
+
+  const prompt = buildSystemPrompt();
+  assert.ok(prompt.includes("MARKER_NOTE_FROM_VOLUME")); // env file is read
+  assert.ok(prompt.includes("COGS Purchasing")); // curated files still present
+
+  // seeding: pointing at a missing file copies the repo learned.md there
+  const seedTarget = path.join(os.tmpdir(), `learned-seed-${process.pid}`, "learned.md");
+  process.env.RSG_AI_LEARNED_NOTES_FILE = seedTarget;
+  t.after(() => fs.rmSync(path.dirname(seedTarget), { recursive: true, force: true }));
+  const seeded = buildSystemPrompt();
+  assert.ok(fs.existsSync(seedTarget));
+  assert.ok(seeded.includes("Learned notes (agent-written)"));
+});

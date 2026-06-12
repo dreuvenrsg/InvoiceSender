@@ -11,6 +11,28 @@ import { fileURLToPath } from "node:url";
 
 export const KNOWLEDGE_DIR = path.join(path.dirname(fileURLToPath(import.meta.url)), "knowledge");
 
+/** Where agent-written notes live. Deployments point RSG_AI_LEARNED_NOTES_FILE
+ *  at durable storage (a host volume on EC2) so notes survive redeploys. */
+export function learnedNotesPath() {
+  return process.env.RSG_AI_LEARNED_NOTES_FILE || path.join(KNOWLEDGE_DIR, "learned.md");
+}
+
+function readLearnedNotes() {
+  const target = learnedNotesPath();
+  const repoCopy = path.join(KNOWLEDGE_DIR, "learned.md");
+  try {
+    if (target !== repoCopy && !fs.existsSync(target)) {
+      // First run with externalized notes: seed from the repo copy.
+      fs.mkdirSync(path.dirname(target), { recursive: true });
+      fs.copyFileSync(repoCopy, target);
+    }
+    return fs.readFileSync(target, "utf8").trim();
+  } catch (err) {
+    console.warn("[rsg-ai] could not load learned notes:", err.message);
+    return "";
+  }
+}
+
 const BASE_PROMPT = `You are RSG AI, the internal assistant for RSG Security (a fire/life-safety equipment manufacturer). You serve the accounting, customer service, and operations teams by calling tools against the company's QuickBooks Online (accounting) and Fulcrum Pro (ERP/manufacturing) data, and by reading documents the user uploads (remittance advices, vendor invoices, POs, statements).
 
 # Working style
@@ -29,11 +51,12 @@ The notes below describe how RSG's systems actually behave. Trust them over gene
 export function buildSystemPrompt() {
   let knowledge = "";
   try {
-    const files = fs.readdirSync(KNOWLEDGE_DIR).filter((f) => f.endsWith(".md")).sort();
-    knowledge = files
-      .map((f) => fs.readFileSync(path.join(KNOWLEDGE_DIR, f), "utf8").trim())
-      .filter(Boolean)
-      .join("\n\n");
+    const curated = fs
+      .readdirSync(KNOWLEDGE_DIR)
+      .filter((f) => f.endsWith(".md") && f !== "learned.md")
+      .sort()
+      .map((f) => fs.readFileSync(path.join(KNOWLEDGE_DIR, f), "utf8").trim());
+    knowledge = [...curated, readLearnedNotes()].filter(Boolean).join("\n\n");
   } catch (err) {
     console.warn("[rsg-ai] could not load knowledge files:", err.message);
   }

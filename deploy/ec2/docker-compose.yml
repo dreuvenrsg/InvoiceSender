@@ -9,6 +9,10 @@ services:
       PORT: "8787"
       AWS_REGION: us-west-1
       RSG_AI_API_KEY: ${RSG_AI_API_KEY}
+      # Agent-written notes persist on the host across deploys
+      RSG_AI_LEARNED_NOTES_FILE: /data/knowledge/learned.md
+    volumes:
+      - /opt/rsg-ai/knowledge:/data/knowledge
     ports:
       - "127.0.0.1:8787:8787"   # host-local only (SG admits 80/443); for health checks + on-box debugging
 
