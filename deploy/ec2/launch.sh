@@ -66,7 +66,7 @@ if ! aws iam get-role --role-name rsg-ai-ec2 >/dev/null 2>&1; then
         ]},
         {\"Effect\": \"Allow\", \"Action\": \"ssm:PutParameter\", \"Resource\":
           \"arn:aws:ssm:${REGION}:${ACCOUNT}:parameter/qbo-invoice-sender/prod/refresh-token\"},
-        {\"Effect\": \"Allow\", \"Action\": [\"logs:CreateLogStream\", \"logs:PutLogEvents\", \"logs:DescribeLogStreams\"], \"Resource\":
+        {\"Effect\": \"Allow\", \"Action\": [\"logs:CreateLogStream\", \"logs:PutLogEvents\", \"logs:DescribeLogStreams\", \"logs:FilterLogEvents\", \"logs:GetLogEvents\"], \"Resource\":
           \"arn:aws:logs:${REGION}:${ACCOUNT}:log-group:/rsg-ai/prod*\"}
       ]
     }"

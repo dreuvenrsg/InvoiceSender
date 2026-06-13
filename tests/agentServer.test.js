@@ -183,6 +183,32 @@ test("attachment normalization sniffs real bytes over the declared type", async 
   assert.equal(msg.content[0].source.media_type, "image/png");
 });
 
+test("log search: filter pattern building and record matching", async () => {
+  const { buildFilterPattern, parseLine, recordMatches } = await import("../src/tools/system/logSearch.js");
+
+  assert.equal(buildFilterPattern({}), undefined);
+  assert.equal(buildFilterPattern({ chatId: "cnv_1" }), '"cnv_1"');
+  assert.equal(
+    buildFilterPattern({ chatId: "cnv_1", type: "tool_call", text: "MIRCOM" }),
+    '"cnv_1" "tool_call" "MIRCOM"'
+  );
+  // embedded quotes can't break out of the pattern term
+  assert.equal(buildFilterPattern({ text: 'a"b' }), '"ab"');
+
+  const rec = parseLine('{"type":"tool_call","chatId":"cnv_1","user":"a@rsg.com","tool":"fulcrum_sales_request"}');
+  assert.equal(rec.tool, "fulcrum_sales_request");
+  assert.deepEqual(parseLine("[rsg-ai] agent API listening"), { raw: "[rsg-ai] agent API listening" });
+  assert.deepEqual(parseLine("42"), { raw: "42" }); // valid JSON but not a record
+
+  assert.equal(recordMatches(rec, { chatId: "cnv_1", type: "tool_call" }), true);
+  assert.equal(recordMatches(rec, { chatId: "cnv_2" }), false);
+  assert.equal(recordMatches(rec, { user: "b@rsg.com" }), false);
+  assert.equal(recordMatches(rec, {}), true);
+  // field filters never match non-JSON lines, but no-filter does
+  assert.equal(recordMatches({ raw: "banner" }, { chatId: "cnv_1" }), false);
+  assert.equal(recordMatches({ raw: "banner" }, {}), true);
+});
+
 test("chatId tags SSE events and every JSONL log line for the turn", async (t) => {
   const os = await import("node:os");
   const fs = await import("node:fs");
@@ -252,10 +278,13 @@ test("role permissions: matrix, validation, and messages", async () => {
   assert.ok(cs.includes("fulcrum_sales_request"));
   assert.ok(!cs.includes("fulcrum_purchasing_request"));
 
-  // finance roles get every registered tool, same as super_admin
+  // super_admin gets every registered tool; finance roles get everything
+  // except backend log search (logs hold all users' questions)
   const allToolNames = tools.map((t) => t.definition.name).sort();
-  for (const role of ["finance", "finance_manager", "super_admin"]) {
-    assert.deepEqual(toolNamesForRole(role).sort(), allToolNames, `${role} should have all tools`);
+  assert.deepEqual(toolNamesForRole("super_admin").sort(), allToolNames);
+  const allButLogSearch = allToolNames.filter((n) => n !== "rsg_ai_log_search");
+  for (const role of ["finance", "finance_manager"]) {
+    assert.deepEqual(toolNamesForRole(role).sort(), allButLogSearch, `${role} should have all tools but log search`);
   }
   assert.deepEqual(toolNamesForRole("intern"), []);
   assert.match(PERMISSION_MESSAGE, /manager/);

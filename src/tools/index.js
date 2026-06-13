@@ -11,8 +11,9 @@ import landedCost from "./accounting/landedCost.js";
 import cashApplication from "./accounting/cashApplication.js";
 import fulcrumApiRequest, { purchasingTool, salesTool } from "./fulcrum/apiRequest.js";
 import saveNote from "./system/saveNote.js";
+import logSearch from "./system/logSearch.js";
 
-export const tools = [landedCost, cashApplication, fulcrumApiRequest, purchasingTool, salesTool, saveNote];
+export const tools = [landedCost, cashApplication, fulcrumApiRequest, purchasingTool, salesTool, saveNote, logSearch];
 
 export function toolDefinitions() {
   return tools.map((t) => t.definition);

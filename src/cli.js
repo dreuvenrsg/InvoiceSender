@@ -38,8 +38,15 @@ async function main() {
   }
 
   const input = json ? JSON.parse(json) : {};
-  console.error(`[cli] Initializing QBO + Fulcrum clients...`);
-  const [qbo, fulcrum] = await Promise.all([QboClient.create(), FulcrumClient.create()]);
+  // Only stand up the clients this tool's domain needs — system tools (log
+  // search, notes) shouldn't demand QBO/Fulcrum credentials to run.
+  const needsQbo = name.startsWith("qbo_");
+  const needsFulcrum = name.startsWith("fulcrum_");
+  if (needsQbo || needsFulcrum) console.error(`[cli] Initializing ${[needsQbo && "QBO", needsFulcrum && "Fulcrum"].filter(Boolean).join(" + ")} client...`);
+  const [qbo, fulcrum] = await Promise.all([
+    needsQbo ? QboClient.create() : null,
+    needsFulcrum ? FulcrumClient.create() : null,
+  ]);
   console.error(`[cli] Running ${name}...`);
   const result = await tool.run(input, { qbo, fulcrum });
 

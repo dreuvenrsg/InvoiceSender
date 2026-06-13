@@ -25,6 +25,9 @@ export const TOOL_ACCESS = {
   fulcrum_sales_request: ["customer_service", ...FINANCE],
   fulcrum_api_request: FINANCE, // the unrestricted ERP explorer (read-only)
   save_operational_note: ALL,
+  // Backend log search: logs hold every user's questions and tool inputs,
+  // so only super admins may read them.
+  rsg_ai_log_search: UNRESTRICTED,
 };
 
 export function isValidRole(role) {

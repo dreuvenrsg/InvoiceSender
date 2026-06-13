@@ -126,8 +126,9 @@ the model and re-checked at dispatch.
 | `qbo_cash_application_lookup` | ✓ | ✓ | | |
 | `fulcrum_purchasing_request` | ✓ | ✓ | ✓ | |
 | `fulcrum_sales_request` | ✓ | ✓ | | ✓ |
-| `fulcrum_api_request` (unrestricted) | ✓ | | | |
+| `fulcrum_api_request` (unrestricted) | ✓ | ✓ | | |
 | `save_operational_note` | ✓ | ✓ | ✓ | ✓ |
+| `rsg_ai_log_search` (backend logs) | ✓ | | | |
 
 `GET /api/tools?role=<role>` returns the filtered list for a role.
 
@@ -155,6 +156,11 @@ key from SSM `/rsg-ai/prod/fulcrum-api-key` or `FULCRUM_API_KEY` env)
   discoveries (API quirks, data conventions) are appended to
   `src/server/knowledge/learned.md` and folded into its system prompt on
   every subsequent turn.
+- `rsg_ai_log_search` — searches the backend's own CloudWatch logs
+  (`/rsg-ai/prod`) by chatId, requestId, user, record type, or free text, so
+  the agent can investigate failed conversations and recent errors on request.
+  Super-admin only (logs contain every user's questions). Also runnable
+  locally: `node src/cli.js rsg_ai_log_search '{"chatId":"…"}'`.
 
 New tools added to `src/tools/index.js` appear automatically — no interface
 changes needed beyond whatever you render from `/api/tools`.
