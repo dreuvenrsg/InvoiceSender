@@ -4,7 +4,12 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Project Overview
 
-RSG Invoice Processor is an AWS Lambda (SAM) automation that processes invoices in two stages on a daily schedule (5:00 PM `America/Los_Angeles`). It is effectively a two-file application plus SAM infra.
+**RSG_AI_Tools** (formerly InvoiceSender) is the backend for RSG AI — the company's internal AI assistant — plus the invoice automation it grew out of. It has two halves:
+
+1. **Invoice processor** — an AWS Lambda (SAM) automation that processes invoices in two stages on a daily schedule (5:00 PM `America/Los_Angeles`), described below.
+2. **Accounting tools + RSG AI agent API** — a modular QBO analysis tool layer and the agent backend for the team-facing chat interface (see "Accounting Tools (`src/`)" below).
+
+The invoice processor is effectively a two-file application plus SAM infra.
 
 1. **Fulcrum stage** (`fulcrumProcessor.js`) — Puppeteer browser automation that logs into Fulcrum, finds "NEEDS ACTION" invoices, and creates/issues them per business rules.
 2. **QBO stage** (`V2_emailSender.js`) — also the Lambda handler/orchestrator. Refreshes the QBO OAuth token, fetches unissued invoices, validates shipping status via the Fulcrum API, updates PO numbers, and emails the sendable ones to customers. Finishes by sending an SES summary email of both stages.
@@ -37,6 +42,21 @@ npm run info       # describe the CloudFormation stack
 ```
 
 Before marking a code change complete: run `npm test`; run `npm run build` for SAM/packaging changes; run `node V2_emailSender.js` for local behavior when credentials are available. If a change touches Fulcrum browser automation, note whether interactive local verification was performed.
+
+## Accounting Tools (`src/`)
+
+A standalone, modular tool layer (separate from the invoice-sender monolith) exposing QBO accounting analyses as Anthropic tool-use definitions, intended to back a future admin-only "RSG AI". It does NOT import `V2_emailSender.js`.
+
+```bash
+node src/cli.js list                                          # list tools
+node src/cli.js qbo_landed_cost_report '{"months":12}'        # CSV lands in artifacts/
+node src/cli.js qbo_cash_application_lookup '{"customer":"MIRCOM INC."}'
+```
+
+- `src/qbo/` — read-focused QBO client. Client id/secret come from env or SSM (`/qbo-invoice-sender/prod/client-id`, `.../client-secret`); the refresh token is the **same SSM parameter the Lambda uses**, and rotation is written back, so the two stay in sync.
+- `src/tools/` — one module per tool exporting `{ definition, run }`, organized by domain: `accounting/` (QBO analyses), `fulcrum/` (ERP access for CS/ops — `fulcrum_api_request` is a generic read-only API tool; the read-only guard lives in `src/fulcrum/client.js`, key in SSM `/rsg-ai/prod/fulcrum-api-key`), and `system/` (agent self-management: saving learned notes; `rsg_ai_log_search` lets the agent search its own CloudWatch logs for debugging, super-admin only). Register new tools in `src/tools/index.js`; tool ctx is `{ qbo, fulcrum }`. Keep business math in pure exported functions covered by `tests/accountingTools.test.js`.
+- `src/server/` — the **RSG AI agent API** (`npm run rsg-ai`): a Claude tool-use agent loop (`agentLoop.js`, default model `claude-opus-4-8`, override with `RSG_AI_MODEL`) behind an SSE HTTP API (`index.js`). The website chat interface lives in a separate repo and talks to this — the contract is `docs/rsg-ai-api.md`; keep that doc updated when the API changes. Auth: `RSG_AI_API_KEY` bearer secret. Anthropic key: `ANTHROPIC_API_KEY` env or SSM `/rsg-ai/prod/anthropic-api-key`. Domain knowledge for the agent lives in `src/server/knowledge/*.md` (curated: `accounting.md`, `fulcrum.md`; agent-written via the save_operational_note tool: `learned.md`) — these are folded into the system prompt (`src/server/systemPrompt.js`) at runtime, so teaching the agent is a markdown edit. Review/prune `learned.md` periodically and promote stable notes into the curated files. Server tests: `tests/agentServer.test.js`. Deploys separately from the Lambda to a tiny EC2 host (t4g.nano + Caddy auto-HTTPS, `rsg-ai.rsgsecurity.com`): `deploy/ec2/update.sh` ships code, `deploy/ec2/shell.sh '<cmd>'` runs remote debugging commands via SSM (no SSH). Container logs stream to CloudWatch group `/rsg-ai/prod` (90-day retention); chat/tool-call records are JSONL tagged with the website's `chatId`, so one conversation greps out of the group. Fargate alternative kept in `deploy/rsg-ai-service.yaml` (`npm run rsg-ai:deploy`).
+- **Data conventions that shape any AP analysis:** bills book nearly everything to the single QBO item "COGS Purchasing"; real part numbers are `PART-NUMBER: description` prefixes in line Descriptions, and freight/tariff/tax charges also appear as description-only lines. Most tariff/freight spend sits on bills with no part lines (broker/carrier bills) and lands in the report's `unallocatedOverhead` bucket.
 
 ## Architecture & Non-Obvious Details
 
@@ -78,6 +98,37 @@ When touching auth/token handling, move toward env vars or SSM rather than addin
 - **Chromium** comes from a public Lambda layer ARN (`ChromiumLayerArn`, currently `...us-west-1:764866452798:layer:chrome-aws-lambda:63`). Update the ARN if the deploy region changes.
 - IAM grants: SSM Get/Put on `/qbo-invoice-sender/*`, SES SendEmail, DynamoDB Put/DeleteItem on the lock table, CloudWatch Logs.
 - Schedule: `ScheduleV2` cron `0 17 * * ? *` in `America/Los_Angeles`.
+
+## Repo Conventions (mandatory upkeep)
+
+These are part of every change, not optional extras:
+
+1. **CLAUDE.md stays current.** Any major change (new feature, new tool, infra
+   change, renamed concept) updates the relevant section of this file in the
+   same PR.
+2. **Specs for major features.** Every major rollout has a numbered spec in
+   `specs/` (format in `specs/README.md`): problem, approach, a task breakdown
+   with checkboxes, verification, and follow-ups. Check tasks off as they
+   complete; record deferred work as unchecked follow-ups.
+3. **`index.md` stays current.** One-line description per tracked file; update
+   it whenever files are added, removed, or repurposed.
+4. **Comment for readability.** New modules get a header comment saying what
+   they are and why; non-obvious constraints get inline comments. Match the
+   existing comment density in `src/`.
+5. **Project invariants — respect these:**
+   - Agent capabilities are `{ definition, run }` modules under a domain folder
+     in `src/tools/`, registered in `src/tools/index.js`. Business math lives
+     in pure exported functions with unit tests.
+   - `src/` never imports the monolith (`V2_emailSender.js`/`fulcrumProcessor.js`),
+     and vice versa.
+   - Secrets live in SSM (env override allowed) — never hardcode new ones.
+   - Fulcrum access is read-only, enforced in `src/fulcrum/client.js` — never
+     weaken the guard or route mutations around it.
+   - Agent domain knowledge is markdown in `src/server/knowledge/`, not prose
+     in code. `learned.md` is agent-written; prune/promote via review.
+   - `docs/rsg-ai-api.md` is the website contract — any API change updates it
+     in the same PR.
+   - Money math uses integer cents (`src/lib/allocation.js`).
 
 ## Working Rules
 

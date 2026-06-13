@@ -4,3 +4,8 @@ dist*
 *.env
 .aws-sam*
 artifacts/
+*.log
+.DS_Store
+.refresh-token-prod.txt
+screenshot_*.png
+test.txt
