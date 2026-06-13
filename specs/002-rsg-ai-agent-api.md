@@ -12,7 +12,7 @@ Give the accounting/CS/ops teams a chat assistant with CLI-agent behavior
 ## Approach
 
 - Manual Claude tool-use loop (`src/server/agentLoop.js`): default
-  `claude-opus-4-8` (env-switchable to `claude-fable-5`), adaptive thinking,
+  `claude-opus-4-8` (env-switchable via `RSG_AI_MODEL`), adaptive thinking,
   effort high, streaming. Oversized tool results truncated before entering
   model context; report CSVs emitted to the UI as `artifact` events instead.
 - Plain-Node HTTP layer (`src/server/index.js`): `POST /api/chat` (SSE),

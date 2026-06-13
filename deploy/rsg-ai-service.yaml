@@ -22,7 +22,7 @@ Parameters:
   RsgAiModel:
     Type: String
     Default: claude-opus-4-8
-    AllowedValues: [claude-opus-4-8, claude-fable-5]
+    AllowedValues: [claude-opus-4-8]
 
 Conditions:
   HasCert: !Not [!Equals [!Ref CertificateArn, '']]

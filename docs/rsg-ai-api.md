@@ -24,7 +24,7 @@ RSG_AI_API_KEY=<shared secret> ANTHROPIC_API_KEY=<anthropic key> npm run rsg-ai
 |---|---|---|
 | `RSG_AI_API_KEY` | yes | Shared bearer secret the interface backend sends |
 | `ANTHROPIC_API_KEY` | yes* | Claude API key. *Falls back to SSM `/rsg-ai/prod/anthropic-api-key` (SecureString) if unset |
-| `RSG_AI_MODEL` | no | `claude-opus-4-8` (default) or `claude-fable-5` |
+| `RSG_AI_MODEL` | no | `claude-opus-4-8` (default) |
 | `PORT` | no | Default `8787` |
 | `RSG_AI_CORS_ORIGIN` | no | Dev only — allows direct browser calls from one origin |
 | `RSG_AI_LOG_FILE` | no | Mirror the JSONL request log to a file (stdout always gets it) |
@@ -51,7 +51,7 @@ Request body:
   "user": "sheffner@rsgsecurity.com",  // REQUIRED in practice: the authenticated admin's email, for audit logging
   "role": "quality_control",           // REQUIRED: the user's admin role (website lib/roles.ts value) — gates tool access
   "chatId": "cnv_8f3a…",               // REQUIRED in practice: the interface's conversation id — tags every backend log line (tool calls included) for debugging
-  "model": "claude-fable-5"            // optional per-request override
+  "model": "claude-opus-4-8"           // optional per-request override
 }
 ```
 

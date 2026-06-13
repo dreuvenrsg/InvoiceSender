@@ -52,7 +52,7 @@ test("system prompt carries the bookkeeping conventions the tools depend on", ()
 });
 
 test("default model is a current Claude model id", () => {
-  assert.match(DEFAULT_MODEL, /^claude-(opus-4-8|fable-5)$/);
+  assert.match(DEFAULT_MODEL, /^claude-opus-4-8$/);
 });
 
 test("system prompt includes knowledge files and the fulcrum sorting quirk", () => {

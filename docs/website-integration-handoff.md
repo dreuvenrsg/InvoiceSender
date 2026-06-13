@@ -88,7 +88,7 @@ API — the website never touches them. Smoke test without the UI:
   the agent's own learned-notes system. Audit logging (user, requestId,
   question, tool calls, timings, usage) is on the backend; the website just
   supplies the user identity.
-- Model: `claude-opus-4-8` default (config knob; `claude-fable-5` available).
+- Model: `claude-opus-4-8` default (config knob via `RSG_AI_MODEL`).
 - **Deployed**: the agent API runs on a tiny EC2 host (us-west-1) behind
   Caddy auto-HTTPS at `https://rsg-ai.rsgsecurity.com` (pending the DNS A
   record -> 52.52.177.16). Prod Vercel env: `RSG_AI_URL=https://rsg-ai.rsgsecurity.com`
